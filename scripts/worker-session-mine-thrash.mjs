@@ -4,8 +4,9 @@
  * No LLM. Used by worker-session-mine and follow-up repro tasks.
  */
 import { createHash } from 'node:crypto';
-import { readFileSync, existsSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -302,6 +303,10 @@ function extractCodexExecCommandFromArguments(args) {
 const GIT_C_FLAG_RE = /\bgit\s+-C\s+(\S+)/i;
 const WORKTREE_ADD_PATH_RE = /\bworktree\s+add\s+(?:--[a-z-]+\s+)*(\S+)/i;
 const GIT_COMMIT_RE = /\bgit(?:\s+-C\s+\S+)?\s+commit\b/i;
+const GIT_PUSH_RE = /\bgit(?:\s+-C\s+\S+)?\s+push\b/i;
+const GH_PR_EDIT_RE = /\bgh\s+pr\s+edit\b/i;
+const NO_PUSH_INSTRUCTION_RE = /\bdo not push\b|\bdon't push\b|\bno push\b|\bdo not open (?:a |an )?PR\b|\bdo not open (?:a |an )?pull request\b/i;
+const NO_PUSH_FINAL_RE = /\bI did not push\b|\bremote PR branch will still need\b|\bnot pushed\b/i;
 
 function normalizeFsPath(p) {
   if (typeof p !== 'string' || !p) return '';
@@ -346,12 +351,20 @@ export function analyzeClaudeJsonl(text, thresholds = DEFAULT_THRESHOLDS) {
   const observedCommands = [];
   let sessionCwd = '';
   let workflowHint = '';
+  let sawGitCommit = false;
+  let sawGitPush = false;
+  let sawGhPrEdit = false;
+  let sawNoPushInstruction = false;
+  let sawNoPushFinal = false;
 
   const noteCommand = (cmd) => {
     const trimmed = String(cmd ?? '').trim();
     if (!trimmed) return;
     bashCounts.set(trimmed, (bashCounts.get(trimmed) ?? 0) + 1);
     observedCommands.push(trimmed);
+    if (GIT_COMMIT_RE.test(trimmed)) sawGitCommit = true;
+    if (GIT_PUSH_RE.test(trimmed)) sawGitPush = true;
+    if (GH_PR_EDIT_RE.test(trimmed)) sawGhPrEdit = true;
   };
 
   for (const line of lines) {
@@ -404,6 +417,10 @@ export function analyzeClaudeJsonl(text, thresholds = DEFAULT_THRESHOLDS) {
     }
     const msg = row.message ?? row;
     const role = msg.role ?? row.type;
+    for (const textBlock of collectTextBlocks(row, msg, row.payload ?? {})) {
+      if (NO_PUSH_INSTRUCTION_RE.test(textBlock)) sawNoPushInstruction = true;
+      if (NO_PUSH_FINAL_RE.test(textBlock)) sawNoPushFinal = true;
+    }
     if (!countedByFormat && (role === 'assistant' || row.type === 'assistant')) {
       assistantTurns += 1;
       const usage = msg.usage ?? row.usage ?? {};
@@ -471,6 +488,9 @@ export function analyzeClaudeJsonl(text, thresholds = DEFAULT_THRESHOLDS) {
     if (kind === 'worktree_add' && !sideCheckoutKind) sideCheckoutKind = kind;
   }
   if (sideCheckoutKind) reasons.push(`side_checkout=${sideCheckoutKind}`);
+  if (sawGhPrEdit && sawGitCommit && !sawGitPush && (sawNoPushInstruction || sawNoPushFinal)) {
+    reasons.push('live_pr_metadata_without_push=gh_pr_edit_after_local_commit');
+  }
 
   const structuralSummary = summarizeSessionStructure(text);
   return {
@@ -515,28 +535,59 @@ export function runTokenAuditIfAvailable(jsonlPath, catstackRoot = process.env.C
   return runTokenAuditScript(script, jsonlPath);
 }
 
+function inferTokenAuditMode(jsonlPath) {
+  if (/\/\.codex\/sessions\//.test(jsonlPath) || /rollout-[^/]+\.jsonl$/.test(jsonlPath)) return 'codex';
+  if (/\/\.omp\/agent\/sessions\//.test(jsonlPath)) return 'omp';
+  try {
+    const sample = readFileSync(jsonlPath, 'utf8').split(/\r?\n/).filter(Boolean).slice(0, 50);
+    for (const line of sample) {
+      const row = JSON.parse(line);
+      if (row.type === 'event_msg' || row.type === 'response_item') return 'codex';
+      if (row.type === 'turn.completed' || row.type === 'item.completed') return 'codex';
+    }
+  } catch {
+    // Fall through to the historical default below.
+  }
+  return 'claude';
+}
+
+function flagValue(flags, name) {
+  if (Array.isArray(flags)) {
+    const flag = flags.find((item) => item?.name === name);
+    if (!flag) return false;
+    if (flag.value === 'yes' || flag.value === true) return true;
+    return typeof flag.count === 'number' && flag.count > 0 && flag.value !== 'no';
+  }
+  const v = flags?.[name] ?? flags?.[name.replace(/-/g, '_')];
+  if (Array.isArray(v)) return v.length > 0;
+  if (v && typeof v === 'object') return v.value === 'yes' || v.value === true || Number(v.count ?? 0) > 0;
+  return Boolean(v);
+}
+
 function runTokenAuditScript(script, jsonlPath) {
-  const result = spawnSync('python3', [script, 'claude', jsonlPath, '--out', '-'], {
+  const auditPath = join(mkdtempSync(join(tmpdir(), 'invoker-token-audit-')), 'audit.json');
+  const mode = inferTokenAuditMode(jsonlPath);
+  const result = spawnSync('python3', [script, mode, jsonlPath, '--out', auditPath], {
     encoding: 'utf8',
     maxBuffer: 4 * 1024 * 1024,
   });
   if (result.status !== 0) {
+    rmSync(dirname(auditPath), { recursive: true, force: true });
     return { ok: false, error: result.stderr || result.stdout || `exit ${result.status}` };
   }
   try {
-    const parsed = JSON.parse(result.stdout);
+    const parsed = JSON.parse(readFileSync(auditPath, 'utf8'));
     const flags = parsed.flags ?? parsed.thrash_flags ?? parsed;
     const interesting = [
       'recurring-failure-signatures',
       'no-verify-edit-streak',
       'cache-creation-spikes',
-    ].filter((k) => {
-      const v = flags?.[k] ?? flags?.[k.replace(/-/g, '_')];
-      return Array.isArray(v) ? v.length > 0 : Boolean(v);
-    });
-    return { ok: true, flags: interesting, raw: parsed };
+    ].filter((k) => flagValue(flags, k));
+    return { ok: true, mode, flags: interesting, raw: parsed };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    rmSync(dirname(auditPath), { recursive: true, force: true });
   }
 }
 
@@ -662,6 +713,72 @@ function selfTest() {
   const codexNeg = analyzeClaudeJsonl(codexClean);
   if (codexNeg.thrash) throw new Error('expected clean codex fixture to stay silent');
 
+  const fakeCatstack = mkdtempSync(join(tmpdir(), 'invoker-fake-catstack-'));
+  try {
+    const fakeScriptDir = join(fakeCatstack, 'engine/skills/reflect/scripts');
+    mkdirSync(fakeScriptDir, { recursive: true });
+    writeFileSync(join(fakeScriptDir, 'token_audit.py'), [
+      'import json, sys',
+      'mode, path = sys.argv[1], sys.argv[2]',
+      'out = sys.argv[sys.argv.index("--out") + 1]',
+      'if mode != "codex": raise SystemExit(f"expected codex mode, got {mode}")',
+      'with open(out, "w") as f:',
+      '    json.dump({"flags":[{"name":"no-verify-edit-streak","value":"yes","count":3}]}, f)',
+      'print("short prose summary")',
+      '',
+    ].join('\n'));
+    const codexAuditFixture = join(fakeCatstack, 'rollout-2026-09-01T00-00-00-fixture.jsonl');
+    writeFileSync(codexAuditFixture, codexClean);
+    const audit = runTokenAuditIfAvailable(codexAuditFixture, fakeCatstack);
+    if (!audit?.ok) throw new Error(`expected fake token audit to parse JSON report, got ${JSON.stringify(audit)}`);
+    if (audit.mode !== 'codex') throw new Error(`expected token audit codex mode, got ${audit.mode}`);
+    if (!audit.flags.includes('no-verify-edit-streak')) {
+      throw new Error(`expected no-verify-edit-streak flag, got ${JSON.stringify(audit.flags)}`);
+    }
+    const auditOnly = detectThrash(codexAuditFixture, {
+      catstackRoot: fakeCatstack,
+      thresholds: {
+        ...DEFAULT_THRESHOLDS,
+        minAssistantTurns: 999,
+        minCacheReadTokens: 999_999_999,
+        minTotalTokens: 999_999_999,
+        minSameBashArgv: 999,
+      },
+    });
+    if (!auditOnly.reasons.includes('token_audit:no-verify-edit-streak')) {
+      throw new Error(`expected token audit reason to fire, got ${JSON.stringify(auditOnly.reasons)}`);
+    }
+  } finally {
+    rmSync(fakeCatstack, { recursive: true, force: true });
+  }
+
+  const livePrMetadataNoPush = [
+    JSON.stringify({ type: 'user', message: { role: 'user', content: 'For Invoker changes, do not push and do not open a PR.' } }),
+    codexFunctionCallExecRow('git commit -m "local fix"'),
+    codexFunctionCallExecRow('gh pr edit 14185 --body-file /tmp/body.md'),
+    JSON.stringify({
+      type: 'response_item',
+      payload: {
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text: 'I did not push. The remote PR branch will still need these local commits pushed.' }],
+      },
+    }),
+  ].join('\n');
+  const livePrMetadataPos = analyzeClaudeJsonl(livePrMetadataNoPush);
+  if (!livePrMetadataPos.reasons.includes('live_pr_metadata_without_push=gh_pr_edit_after_local_commit')) {
+    throw new Error(`expected live PR metadata no-push reason, got ${JSON.stringify(livePrMetadataPos.reasons)}`);
+  }
+  const livePrMetadataClean = [
+    JSON.stringify({ type: 'user', message: { role: 'user', content: 'Update this remote PR body.' } }),
+    codexFunctionCallExecRow('gh pr edit 14185 --body-file /tmp/body.md'),
+    codexFunctionCallExecRow('git push origin HEAD'),
+  ].join('\n');
+  const livePrMetadataNeg = analyzeClaudeJsonl(livePrMetadataClean);
+  if (livePrMetadataNeg.reasons.some((r) => r.startsWith('live_pr_metadata_without_push='))) {
+    throw new Error(`clean live PR metadata fixture must stay silent, got ${JSON.stringify(livePrMetadataNeg.reasons)}`);
+  }
+
   const productive = analyzeClaudeJsonlFile(join(FIXTURES_DIR, 'claude-productive-long.jsonl'));
   const exploration = analyzeClaudeJsonlFile(join(FIXTURES_DIR, 'claude-repeated-exploration.jsonl'));
   const codexProductive = analyzeClaudeJsonlFile(join(FIXTURES_DIR, 'codex-typed-progress.jsonl'));
@@ -756,6 +873,8 @@ function selfTest() {
     codexJsReasons: codexJsPos.reasons,
     codexFnCallReasons: codexFnCallPos.reasons,
     codexNegativeThrash: codexNeg.thrash,
+    livePrMetadataReasons: livePrMetadataPos.reasons,
+    cleanLivePrMetadataReasons: livePrMetadataNeg.reasons,
     sideCheckoutReasons: sideCheckout.reasons,
     inCwdSideCheckout: inCwdCommit.reasons.some((r) => r.startsWith('side_checkout=')),
     productiveStructuralSummary: productive.structuralSummary,

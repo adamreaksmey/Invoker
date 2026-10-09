@@ -130,6 +130,28 @@ describe('runHeadlessIpcClient', () => {
     expect(received[0]?.traceId).toMatch(/^headless\.run:thin:/);
   });
 
+  it('resolves a relative plan path before requesting the owner intake', async () => {
+    const originalCwd = process.cwd();
+    const received: Array<{ planPath: string; traceId?: string }> = [];
+    await startOwner((req) => {
+      received.push(req);
+      return { workflowId: 'wf-owner-relative', workflowIds: ['wf-owner-relative'], tasks: [] };
+    });
+
+    try {
+      process.chdir(harness.dir);
+
+      const code = await runClient(['--headless', '--no-track', 'run', 'plan.yaml']);
+
+      expect(code, stderrText()).toBe(0);
+      expect(stdoutText()).toBe('Workflow ID: wf-owner-relative\n');
+      expect(received).toHaveLength(1);
+      expect(received[0]?.planPath).toBe(resolve(harness.dir, 'plan.yaml'));
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
   it('exits non-zero when the owner acks without a persisted workflow id', async () => {
     await startOwner(() => ({ ok: true }));
 
@@ -139,6 +161,25 @@ describe('runHeadlessIpcClient', () => {
     expect(stdoutText()).toBe('');
     expect(stderrText()).toContain('without a persisted workflow id');
     expect(stderrText()).toContain(harness.planPath);
+  });
+
+  it('reports the resolved plan path when a relative-path run is rejected', async () => {
+    const originalCwd = process.cwd();
+    await startOwner(() => ({ ok: true }));
+
+    try {
+      process.chdir(harness.dir);
+
+      const code = await runClient(['run', 'plan.yaml']);
+
+      expect(code).toBe(1);
+      expect(stdoutText()).toBe('');
+      expect(stderrText()).toContain('without a persisted workflow id');
+      expect(stderrText()).toContain(resolve(harness.dir, 'plan.yaml'));
+      expect(stderrText()).not.toContain('plan "plan.yaml"');
+    } finally {
+      process.chdir(originalCwd);
+    }
   });
 
   it('exits non-zero when the owner reports an empty workflow id', async () => {
