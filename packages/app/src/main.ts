@@ -874,7 +874,10 @@ function getBundledSkillsStatus() {
 }
 
 function installPackagedSkills(mode: BundledSkillsInstallMode = 'install', category: BundledSkillCategory = 'all') {
-  return installBundledSkills(buildBundledSkillsContext(), mode, category);
+  if (mode === 'uninstall') {
+    return installBundledSkills(buildBundledSkillsContext(), mode, category);
+  }
+  return installBundledSkills(buildBundledSkillsContext(), mode, category, { registerHarnesses: true });
 }
 
 function buildCliInstallerContext(): CliInstallerContext {
