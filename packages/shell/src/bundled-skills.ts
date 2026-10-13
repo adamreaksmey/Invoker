@@ -43,7 +43,7 @@ const INVOKER_SKILLS_DIR = 'skills';
 const INVOKER_COMMANDS_DIR = 'commands';
 const INVOKER_MCP_SNIPPET_RELATIVE = path.join('mcp-servers', 'invoker.json');
 export const HARNESS_REGISTRATION_HINT =
-  'Harness MCP/skills stay opt-in. Snippet at ~/.invoker/mcp-servers/invoker.json — re-run setup and answer yes, or pass --register-harnesses.';
+  'Harness MCP/skills stay opt-in. Re-run setup and answer yes, or pass --register-harnesses.';
 
 interface BundledSkillsManifest {
   bundledHash: string;
@@ -77,7 +77,7 @@ interface BundledSkillsContext {
 }
 
 export interface InstallBundledSkillsOptions {
-  /** When true, also write MCP/skills/commands/always-on into detected harnesses. Default false. */
+  /** When true, write MCP/skills/commands/always-on into detected harnesses. Default false (no skill materialization). */
   registerHarnesses?: boolean;
 }
 
@@ -352,15 +352,6 @@ function syncCommandTargets(params: {
 
 function resolveInvokerMcpSnippetPath(invokerHomeRoot: string): string {
   return path.join(invokerHomeRoot, INVOKER_MCP_SNIPPET_RELATIVE);
-}
-
-function writeInvokerMcpSnippet(invokerHomeRoot: string): void {
-  const snippetPath = resolveInvokerMcpSnippetPath(invokerHomeRoot);
-  mkdirSync(path.dirname(snippetPath), { recursive: true });
-  writeFileAtomic(
-    snippetPath,
-    `${JSON.stringify({ mcpServers: { [INVOKER_MCP_SERVER_NAME]: INVOKER_MCP_SERVER } }, null, 2)}\n`,
-  );
 }
 
 function removeInvokerMcpSnippet(invokerHomeRoot: string): void {
@@ -1116,8 +1107,8 @@ export function resolveBundledSkillsStatus(context: BundledSkillsContext): Bundl
       promptRecommended: false,
       managedPrefix: MANAGED_PREFIX,
       bundledSkillNames: [],
-      targets: resolveManagedTargets(invokerHomeRoot),
-      commandTargets: resolveManagedCommandTargets(invokerHomeRoot),
+      targets: resolveHarnessSkillTargets(),
+      commandTargets: resolveHarnessCommandTargets(),
       mcpTargets: resolveManagedMcpTargets(isInstalled),
       instructionTargets,
     };
@@ -1126,11 +1117,11 @@ export function resolveBundledSkillsStatus(context: BundledSkillsContext): Bundl
   const bundledSkillNames = listBundledSkillNames(sourceRoot);
   const installedNames = prefixedSkillNames(bundledSkillNames);
   const bundledHash = hashDirectory(sourceRoot);
-  const targets = resolveManagedTargets(invokerHomeRoot).map((target) =>
+  const targets = resolveHarnessSkillTargets().map((target) =>
     buildTargetStatus(target, installedNames, bundledHash, manifest),
   );
   const commandFiles = listCommandNames(sourceRoot);
-  const commandTargets = resolveManagedCommandTargets(invokerHomeRoot).map((target) =>
+  const commandTargets = resolveHarnessCommandTargets().map((target) =>
     buildCommandConfigState(target, commandFiles, bundledHash, manifest),
   );
   const mcpTargets = resolveManagedMcpTargets(isInstalled).map((target) =>
@@ -1172,6 +1163,12 @@ export function installBundledSkills(
     throw new Error('Bundled skills are not available in this app build.');
   }
 
+  removeLeftoverHomeSkillArtifacts(invokerHomeRoot);
+
+  if (!registerHarnesses) {
+    return resolveBundledSkillsStatus(context);
+  }
+
   const previousManifest = readManifest(invokerHomeRoot);
   const bundledSkillNames = listBundledSkillNames(sourceRoot, category);
   for (const skillName of bundledSkillNames) {
@@ -1200,36 +1197,20 @@ export function installBundledSkills(
     previousManifest,
     manifestTargets,
   };
-  syncSkillTargets({ ...skillSync, targets: resolveManagedTargets(invokerHomeRoot) });
+  syncSkillTargets({ ...skillSync, targets: resolveHarnessSkillTargets() });
   syncCommandTargets({
-    targets: resolveManagedCommandTargets(invokerHomeRoot),
+    targets: resolveHarnessCommandTargets(),
     sourceRoot,
     commandFiles,
     previousManifest,
     manifestCommandTargets,
   });
-  writeInvokerMcpSnippet(invokerHomeRoot);
 
-  let mcpRecorded: NonNullable<BundledSkillsManifest['mcpTargets']> = {};
-  let instructionRecorded: NonNullable<BundledSkillsManifest['instructionTargets']> = {};
-  let lastInstallError: string | undefined;
+  const mcpInstall = installAvailableMcpTargets(resolveManagedMcpTargets(isInstalled));
+  const instructionErrors: string[] = [];
+  const instructionRecorded = installInstructionTargets(invokerHomeRoot, instructionErrors) ?? {};
+  const lastInstallError = joinInstallErrors([...mcpInstall.errors, ...instructionErrors]);
   const instructionHash = hashAlwaysOnFragments();
-
-  if (registerHarnesses) {
-    syncSkillTargets({ ...skillSync, targets: resolveHarnessSkillTargets() });
-    syncCommandTargets({
-      targets: resolveHarnessCommandTargets(),
-      sourceRoot,
-      commandFiles,
-      previousManifest,
-      manifestCommandTargets,
-    });
-    const mcpInstall = installAvailableMcpTargets(resolveManagedMcpTargets(isInstalled));
-    const instructionErrors: string[] = [];
-    instructionRecorded = installInstructionTargets(invokerHomeRoot, instructionErrors) ?? {};
-    mcpRecorded = mcpInstall.recorded;
-    lastInstallError = joinInstallErrors([...mcpInstall.errors, ...instructionErrors]);
-  }
 
   const manifest: BundledSkillsManifest = {
     bundledHash,
@@ -1238,7 +1219,7 @@ export function installBundledSkills(
     lastInstallError,
     targets: manifestTargets,
     commandTargets: manifestCommandTargets,
-    mcpTargets: mcpRecorded,
+    mcpTargets: mcpInstall.recorded,
     instructionTargets: instructionRecorded,
     instructionHash,
     sourceRepoRoot: context.isPackaged ? undefined : context.repoRoot,
@@ -1250,8 +1231,13 @@ export function installBundledSkills(
   const status = resolveBundledSkillsStatus(context);
   return {
     ...status,
-    promptRecommended: context.isPackaged && mode === 'install' ? false : status.promptRecommended,
+    promptRecommended: false,
   };
+}
+
+function removeLeftoverHomeSkillArtifacts(invokerHomeRoot: string): void {
+  rmSync(path.join(invokerHomeRoot, INVOKER_SKILLS_DIR), { recursive: true, force: true });
+  rmSync(path.join(invokerHomeRoot, INVOKER_COMMANDS_DIR), { recursive: true, force: true });
 }
 
 function removeLegacyHarnessCopies(
@@ -1262,11 +1248,11 @@ function removeLegacyHarnessCopies(
   isInstalled: IsInstalled,
 ): void {
   if (!previousManifest) return;
-  const keepSkillPath = path.join(invokerHomeRoot, INVOKER_SKILLS_DIR);
-  const keepCommandPath = path.join(invokerHomeRoot, INVOKER_COMMANDS_DIR);
+  const liveSkillPaths = new Set(resolveHarnessSkillTargets().map((target) => target.path));
+  const liveCommandPaths = new Set(resolveHarnessCommandTargets().map((target) => target.path));
 
   for (const entry of Object.values(previousManifest.targets ?? {})) {
-    if (entry.path === keepSkillPath) continue;
+    if (liveSkillPaths.has(entry.path)) continue;
     removeManagedSkillDirs(entry.path, entry.installedSkillNames.length > 0 ? entry.installedSkillNames : managedSkillNames);
   }
   removeManagedSkillDirs(
@@ -1275,7 +1261,7 @@ function removeLegacyHarnessCopies(
   );
 
   for (const entry of Object.values(previousManifest.commandTargets ?? {})) {
-    if (entry.path === keepCommandPath) continue;
+    if (liveCommandPaths.has(entry.path)) continue;
     const files = entry.installedCommandNames.map((name) => name.endsWith('.md') ? name : `${name}.md`);
     removeManagedCommandFiles(entry.path, files.length > 0 ? files : commandFiles);
   }
@@ -1330,16 +1316,17 @@ function uninstallBundledSkills(
 
   removeLegacyHarnessCopies(manifest, invokerHomeRoot, expectedNames, commandFiles, isInstalled);
 
-  for (const target of resolveManagedTargets(invokerHomeRoot)) {
+  for (const target of [...resolveManagedTargets(invokerHomeRoot), ...resolveHarnessSkillTargets()]) {
     const names = managedNamesFromManifestOrPrefix(manifest, target.path);
     removeManagedSkillDirs(target.path, names.length > 0 ? names : expectedNames);
   }
 
-  for (const target of resolveManagedCommandTargets(invokerHomeRoot)) {
+  for (const target of [...resolveManagedCommandTargets(invokerHomeRoot), ...resolveHarnessCommandTargets()]) {
     const files = managedCommandFilesFromManifestOrPrefix(manifest, target.path);
     removeManagedCommandFiles(target.path, files.length > 0 ? files : commandFiles);
   }
 
+  removeLeftoverHomeSkillArtifacts(invokerHomeRoot);
   removeInvokerMcpSnippet(invokerHomeRoot);
   rmSync(resolveManifestPath(invokerHomeRoot), { force: true });
 
