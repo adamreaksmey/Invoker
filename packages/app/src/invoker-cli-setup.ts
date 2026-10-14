@@ -91,9 +91,9 @@ function summarizeCliInstall(result: CliInstallResult): string {
 function summarizeHelpers(status: BundledSkillsStatus): string {
   const targets = [...status.targets, ...status.commandTargets];
   const installed = targets.filter((target) => target.installed && target.upToDate).length;
-  const summary = `Installed ${status.bundledSkillNames.length} bundled helper set(s) into harnesses (${installed}/${targets.length} target(s)).`;
+  const summary = `Installed ${status.bundledSkillNames.length} bundled helper set(s) across ${installed}/${targets.length} available target(s).`;
   if (!status.lastInstallError) return summary;
-  return `${summary} MCP skipped: ${status.lastInstallError}`;
+  return `${summary} Install note: ${status.lastInstallError}`;
 }
 
 function machinesErrorResult(machines: RemoteTargetInput[], message: string): MachineSetupResult[] {

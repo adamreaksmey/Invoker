@@ -39,11 +39,6 @@ const CURSOR_RULE_FILE = 'invoker-execution-precedence.mdc';
 const CLAUDE_HOOK_MARKER = 'invoker-execution/claude_prompt_submit';
 const INSTRUCTION_NAME = 'invoker-execution';
 const INSTALL_ERROR_JOIN = '; ';
-const INVOKER_SKILLS_DIR = 'skills';
-const INVOKER_COMMANDS_DIR = 'commands';
-const INVOKER_MCP_SNIPPET_RELATIVE = path.join('mcp-servers', 'invoker.json');
-export const HARNESS_REGISTRATION_HINT =
-  'Harness MCP/skills stay opt-in. Re-run setup and answer yes, or pass --register-harnesses.';
 
 interface BundledSkillsManifest {
   bundledHash: string;
@@ -605,6 +600,15 @@ function readJsonRecordIfPresent(filePath: string): JsonRecord | null {
   }
 }
 
+function readTextFileIfPresent(filePath: string): string | null {
+  if (!existsSync(filePath)) return null;
+  try {
+    return readFileSync(filePath, 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
 function isInvokerMcpServer(value: unknown): boolean {
   if (!isJsonRecord(value)) return false;
   return value.type === 'stdio'
@@ -658,9 +662,10 @@ function findTomlInvokerServerBlockRange(content: string, serverName: string): {
 }
 
 function isMcpTargetInstalled(target: McpTargetCandidate): boolean {
-  if (!existsSync(target.path)) return false;
   if (target.format === 'toml') {
-    return isTomlInvokerServerRegistered(readFileSync(target.path, 'utf-8'), target.serverName);
+    const content = readTextFileIfPresent(target.path);
+    if (content === null) return false;
+    return isTomlInvokerServerRegistered(content, target.serverName);
   }
   const config = readJsonRecordIfPresent(target.path);
   const servers = isJsonRecord(config?.mcpServers) ? config.mcpServers : undefined;
@@ -982,12 +987,13 @@ function uninstallClaudeHook(invokerHomeRoot: string): void {
 }
 
 function cursorRuleInstalled(): boolean {
-  return existsSync(resolveCursorRulePath()) && readFileSync(resolveCursorRulePath(), 'utf8').includes('Invoker execution routing');
+  const content = readTextFileIfPresent(resolveCursorRulePath());
+  return content !== null && content.includes('Invoker execution routing');
 }
 
 function codexAgentsInstalled(): boolean {
-  const agentsPath = resolveCodexAgentsPath();
-  return existsSync(agentsPath) && readFileSync(agentsPath, 'utf8').includes(INSTRUCTION_BEGIN);
+  const content = readTextFileIfPresent(resolveCodexAgentsPath());
+  return content !== null && content.includes(INSTRUCTION_BEGIN);
 }
 
 function claudeHookInstalled(): boolean {
@@ -1192,28 +1198,30 @@ export function installBundledSkills(
     isInstalled,
   );
 
-  const skillSync = {
-    sourceRoot,
-    bundledSkillNames,
-    installedNames,
-    currentBundledSkillNames,
-    previousManifest,
-    manifestTargets,
-  };
-  syncSkillTargets({ ...skillSync, targets: resolveHarnessSkillTargets() });
-  syncCommandTargets({
-    targets: resolveHarnessCommandTargets(),
-    sourceRoot,
-    commandFiles,
-    previousManifest,
-    manifestCommandTargets,
-  });
+  const commandSourceRoot = commandSourceDir(sourceRoot);
+  const commandFiles = listCommandNames(sourceRoot);
+  const currentCommandNames = new Set(commandFiles.map(commandDisplayName));
+  for (const target of commandTargets) {
+    mkdirSync(target.path, { recursive: true });
+    const previouslyInstalledNames = previousManifest?.commandTargets?.[target.id]?.installedCommandNames ?? [];
+    const droppedCommandFiles = previouslyInstalledNames
+      .filter((name) => name.startsWith(MANAGED_PREFIX) && !currentCommandNames.has(name))
+      .map((name) => name.endsWith('.md') ? name : `${name}.md`);
+    removeManagedCommandFiles(target.path, droppedCommandFiles);
+    for (const fileName of commandFiles) {
+      copyFileSync(path.join(commandSourceRoot, fileName), path.join(target.path, fileName));
+    }
+    manifestCommandTargets[target.id] = {
+      path: target.path,
+      installedCommandNames: commandFiles.map(commandDisplayName),
+    };
+  }
 
-  const mcpInstall = installAvailableMcpTargets(resolveManagedMcpTargets(isInstalled));
+  const mcpInstall = installAvailableMcpTargets(mcpTargets);
   const instructionErrors: string[] = [];
-  const instructionRecorded = installInstructionTargets(invokerHomeRoot, instructionErrors) ?? {};
-  const lastInstallError = joinInstallErrors([...mcpInstall.errors, ...instructionErrors]);
   const instructionHash = hashAlwaysOnFragments();
+  const manifestInstructionTargets = installInstructionTargets(invokerHomeRoot, instructionErrors);
+  const lastInstallError = joinInstallErrors([...mcpInstall.errors, ...instructionErrors]);
 
   const manifest: BundledSkillsManifest = {
     bundledHash,
@@ -1223,7 +1231,7 @@ export function installBundledSkills(
     targets: manifestTargets,
     commandTargets: manifestCommandTargets,
     mcpTargets: mcpInstall.recorded,
-    instructionTargets: instructionRecorded,
+    instructionTargets: manifestInstructionTargets,
     instructionHash,
     sourceRepoRoot: context.isPackaged ? undefined : context.repoRoot,
     yamlModuleRoot: resolveYamlModuleRoot(context),
