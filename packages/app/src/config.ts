@@ -9,7 +9,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { BUILTIN_PLANNING_PRESETS, resolveInvokerConfigPath } from '@invoker/contracts';
-import type { PlanningConfirmationMode } from '@invoker/contracts';
+import type { PlanningConfirmationMode, PlanningPresetSpec } from '@invoker/contracts';
 import { validateInvokerConfig, type ConfigValidationOptions } from './config-validation.js';
 import type {
   E2eAutoFixWorkerConfig,
@@ -444,7 +444,7 @@ export interface InvokerConfig {
    */
   plannerRetryBaseDelayMs?: number;
   /** Named Slack planning harness presets: preset key → {tool, model}; built-ins apply when omitted. */
-  slackHarnessPresets?: Record<string, { tool: 'cursor' | 'omp' | 'codex' | 'claude'; model?: string }>;
+  slackHarnessPresets?: Record<string, PlanningPresetSpec>;
   /** Default harness preset key when the message carries no `[preset]` tag. Default: 'cursor+claude'. */
   defaultSlackHarnessPreset?: string;
   /** Slack repo aliases: alias → git URL, resolved from a `[repo:<alias>]` tag. */
@@ -788,8 +788,6 @@ function wrapperPresetMatchesAllowlist(
   if (!WRAPPER_PLANNING_TOOLS[tool]) return false;
   const model = preset.model?.trim().toLowerCase();
   if (model && enabled.has(model)) return true;
-  // Cursor presets use real CLI model ids; match legacy allowlists via key suffix
-  // (e.g. cursor+codex → codex) rather than requiring model === "codex".
   const keySuffix = preset.key?.split('+').pop()?.trim().toLowerCase();
   if (keySuffix && enabled.has(keySuffix)) return true;
   if (model && enabled.has('claude') && model.includes('claude')) return true;

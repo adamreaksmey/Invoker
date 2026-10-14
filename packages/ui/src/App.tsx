@@ -775,27 +775,41 @@ export function App() {
     window.invoker?.getRuntimeStatus?.().then(setRuntimeStatus).catch(() => {});
     setPlanningPresetsLoading(true);
     window.invoker?.getPlanningPresets?.()
-      .then((options) => {
-        const resolved = Array.isArray(options)
-          ? options.map((option) => ({
-              key: option.key,
-              label: option.label,
-              tool: option.tool,
-              model: option.model,
-              isDefault: option.isDefault,
-              defaultConfirmationMode: option.defaultConfirmationMode,
-            }))
-          : [];
+      .then((response) => {
+        const normalized: PlanningPresetsResponse = Array.isArray(response)
+          ? { options: response }
+          : (response ?? { options: [] });
+        const resolved = (normalized.options ?? []).map((option) => ({
+          key: option.key,
+          label: option.label,
+          tool: option.tool,
+          model: option.model,
+          isDefault: option.isDefault,
+          defaultConfirmationMode: option.defaultConfirmationMode,
+          availability: option.availability,
+          section: option.section,
+        }));
         setPlanningPresetOptions(resolved);
-        const defaultOption = resolved.find((option) => option.isDefault) ?? resolved[0];
-        setSelectedPlanningPresetKey(defaultOption?.key ?? '');
-        setSelectedPlanningConfirmationMode(defaultOption?.defaultConfirmationMode ?? 'require');
+        setCursorDiscoverySummary(normalized.cursorDiscovery);
+        if (!planningPresetSelectionInitializedRef.current) {
+          planningPresetSelectionInitializedRef.current = true;
+          const defaultOption = resolved.find((option) => option.isDefault) ?? resolved[0];
+          setSelectedPlanningPresetKey(defaultOption?.key ?? '');
+          setSelectedPlanningConfirmationMode(defaultOption?.defaultConfirmationMode ?? 'require');
+        } else {
+          setSelectedPlanningPresetKey((previous) => previous);
+        }
       })
       .catch((err) => {
         console.error('Failed to load planning presets', err);
         setPlanningPresetOptions([]);
-        setSelectedPlanningPresetKey('');
-        setSelectedPlanningConfirmationMode('require');
+        setCursorDiscoverySummary({
+          status: 'failed',
+          warning: 'Could not load planning presets.',
+        });
+      })
+      .finally(() => {
+        setPlanningPresetsLoading(false);
       });
     refreshSystemDiagnostics();
   }, [refreshSystemDiagnostics]);

@@ -37,8 +37,8 @@ import type {
   PlanningTerminalMode,
   PlanningPresetOption,
   PlanningPresetsResponse,
-  type CursorModelDiscoverySummary,
-  type PlanningModelAvailability,
+  CursorModelDiscoverySummary,
+  PlanningModelAvailability,
 } from '@invoker/contracts';
 import {
   curatedCursorPlanningModelIds,
@@ -82,6 +82,7 @@ import {
   type PlanningRepoPool,
 } from './planning-chat-worktree.js';
 import { commandIsOnPath } from './system-diagnostics.js';
+import { discoverCursorPlanningModels } from './cursor-model-discovery.js';
 
 function logPlanningWorktreeReadyError(sessionId: string, step: string, error: unknown): void {
   console.error(`[planning-chat] ensurePlanningWorktreeReady ${step} failed session="${sessionId}": ${
@@ -128,7 +129,6 @@ export interface InAppPlannerDeps {
   onRawPlannerOutput?: (event: InAppPlanningStreamEvent) => void;
   /** Canonical full skill-doctor script. Kept separate from target worktrees. */
   planDoctorScriptPath?: string;
-  /** PATH probe for planner tools (injectable for tests; defaults to {@link commandIsOnPath}). */
   isInstalled?: (command: string) => boolean;
 }
 
@@ -174,6 +174,17 @@ export function createInAppPlanningChatSessions(): InAppPlanningChatSessions {
 }
 
 export const PLANNING_TURN_CANCELLED_MESSAGE = 'Cancelled.';
+
+function isTurnAlreadyMarkedCancelled(
+  status: InAppPlanningTurnStatus | undefined,
+  error: string | undefined,
+  activeTurnId: string | undefined,
+  turnId: string,
+): boolean {
+  return status === 'failed'
+    && error === PLANNING_TURN_CANCELLED_MESSAGE
+    && activeTurnId === turnId;
+}
 
 function isModuleResolutionError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
@@ -1025,11 +1036,17 @@ function applyCursorModelDiscovery(
  * dispatch — gets the same filtered view without double-filtering.
  * After the allowlist, presets whose planner `tool` is not on Invoker’s PATH
  * are dropped (injectable for tests; defaults to {@link commandIsOnPath}).
+ * When Cursor is available, hybrid discovery intersects the curated manifest
+ * with `cursor-agent --list-models` and appends non-curated ids under section "more".
  */
 export async function listInAppPlanningPresets(
   config: InvokerConfig,
-  opts?: { isInstalled?: (command: string) => boolean },
-): Promise<PlanningPresetOption[]> {
+  opts?: {
+    isInstalled?: (command: string) => boolean;
+    refreshCursorModels?: boolean;
+    skipCursorDiscovery?: boolean;
+  },
+): Promise<PlanningPresetsResponse> {
   const isInstalled = opts?.isInstalled ?? commandIsOnPath;
   const presets = await resolveHarnessPresets(config);
   const defaultPresetKey = await resolveDefaultPresetKey(config);
@@ -1142,11 +1159,6 @@ export function listPlanningChatSessions(
   return { ok: true, sessions };
 }
 
-/**
- * UI sends the selected preset with every turn. Apply it to the live session so
- * harness switches take effect on the next message instead of keeping the
- * PlanConversation tool/driver from session creation.
- */
 async function syncPlanningSessionPreset(
   session: InAppPlanningChatSession,
   requestedPresetKey: string | undefined,
@@ -1244,6 +1256,15 @@ export async function sendPlanningChatMessage(
       return { ok: false, sessionId: session.id, turnId, error: 'duplicate-turn' };
     }
     const sessionPresets = await resolveHarnessPresets(deps.config);
+    const presetSyncError = await syncPlanningSessionPreset(
+      session,
+      typeof rawRequest?.presetKey === 'string' ? rawRequest.presetKey : undefined,
+      sessionPresets,
+      deps,
+    );
+    if (presetSyncError) {
+      return { ok: false, sessionId: session.id, turnId, error: presetSyncError };
+    }
     const sessionPreset = sessionPresets[session.presetKey];
     if (!sessionPreset) {
       return {
@@ -1487,9 +1508,12 @@ export async function sendPlanningChatMessage(
         const failureMessage = cancelled
           ? PLANNING_TURN_CANCELLED_MESSAGE
           : error instanceof Error ? error.message : String(error);
-        const alreadyCancelled = activeSession.activeTurnStatus === 'failed'
-          && activeSession.activeTurnError === PLANNING_TURN_CANCELLED_MESSAGE
-          && activeSession.activeTurnId === turnId;
+        const alreadyCancelled = isTurnAlreadyMarkedCancelled(
+          activeSession.activeTurnStatus,
+          activeSession.activeTurnError,
+          activeSession.activeTurnId,
+          turnId,
+        );
         if (!alreadyCancelled) {
           activeSession.activeTurnStatus = 'failed';
           activeSession.activeTurnError = failureMessage;

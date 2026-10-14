@@ -47,6 +47,23 @@ export interface PlanningHarnessChoice {
 export const PLANNING_TOOLS_EMPTY_PATH_MESSAGE =
   "No planning tools on Invoker's PATH. Install one (e.g. Cursor), then restart Invoker. Check with: invoker-cli doctor";
 
+export const PLANNING_TURN_CANCELLED_MESSAGE = 'Cancelled.';
+
+export function isPlanningCancelledFailure(message: string | null | undefined): boolean {
+  if (!message) return false;
+  const trimmed = message.trim();
+  return trimmed === PLANNING_TURN_CANCELLED_MESSAGE
+    || trimmed.endsWith(`\n${PLANNING_TURN_CANCELLED_MESSAGE}`);
+}
+
+function planningStreamStatusLabel(stream: InvokerTerminalPlanningStream | null | undefined): string {
+  if (!stream) return 'Working…';
+  if (stream.status !== 'failed') return 'Drafting your plan…';
+  return isPlanningCancelledFailure(stream.text)
+    ? 'Planning cancelled'
+    : 'Planning stopped';
+}
+
 function titleCaseIdentifier(value: string): string {
   return value
     .split(/[-_\s/]+/)
@@ -62,7 +79,6 @@ function formatPlanningHarnessLabel(tool: string, options: PlanningPresetOptionV
 
 function formatPlanningModelLabel(model: string, fallbackLabel?: string): string {
   const trimmed = fallbackLabel?.trim();
-  // Prefer builtin model labels; skip harness-compound labels like "Claude via OMP".
   if (trimmed && !/[+]|\bvia\b/i.test(trimmed)) {
     return trimmed;
   }
@@ -139,9 +155,7 @@ interface InvokerTerminalProps {
   value: string;
   selectedPresetKey: string;
   presetOptions: PlanningPresetOptionView[];
-  /** True while planning presets / Cursor model discovery is in flight. */
   planningPresetsLoading?: boolean;
-  /** Concise Cursor discovery warning (failed/empty); omit when ok/skipped. */
   cursorDiscoveryWarning?: string | null;
   selectedConfirmationMode: PlanningConfirmationMode;
   draftPlanAvailable: boolean;
@@ -915,10 +929,12 @@ export function InvokerTerminal({
   const sendButtonDisabledCursorClass = 'disabled:cursor-not-allowed';
   const harnessChoices = useMemo(() => buildPlanningHarnessChoices(presetOptions), [presetOptions]);
   const hasPlanningTools = harnessChoices.length > 0;
-  const selectedPreset = useMemo(
-    () => findPresetOption(presetOptions, selectedPresetKey) ?? presetOptions[0],
-    [presetOptions, selectedPresetKey],
-  );
+  const selectedPreset = useMemo(() => {
+    const matched = findPresetOption(presetOptions, selectedPresetKey);
+    if (matched) return matched;
+    if (selectedPresetKey) return undefined;
+    return presetOptions[0];
+  }, [presetOptions, selectedPresetKey]);
   const selectedHarness = useMemo(
     () => harnessChoices.find((choice) => choice.tool === selectedPreset?.tool) ?? harnessChoices[0],
     [harnessChoices, selectedPreset?.tool],
@@ -932,7 +948,6 @@ export function InvokerTerminal({
         ]
       : [];
     if (!selectedPresetKey || base.some((option) => option.key === selectedPresetKey)) return base;
-    // Keep a saved selection visible even when live discovery no longer lists it.
     return [
       ...base,
       {
@@ -947,7 +962,6 @@ export function InvokerTerminal({
   const recommendedModelOptions = modelSelectOptions.filter((option) => option.section !== 'more');
   const moreModelOptions = modelSelectOptions.filter((option) => option.section === 'more');
   const showModelSelect = Boolean(selectedHarness && selectedHarness.modelPresets.length > 0);
-  // Prefer the caller's selected key so discovery refresh never visually swaps the model.
   const selectedModelPresetKey = selectedPresetKey || modelSelectOptions[0]?.key || '';
 
   const handleHarnessChange = useCallback((event: ChangeEvent<HTMLSelectElement>): void => {

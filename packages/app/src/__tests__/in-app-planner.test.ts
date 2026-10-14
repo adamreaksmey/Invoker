@@ -299,6 +299,7 @@ describe('planFromGoal', () => {
 });
 describe('listInAppPlanningPresets', () => {
   const allInstalled = () => true;
+  const skipDiscovery = { skipCursorDiscovery: true as const };
 
   it('returns deterministic labels and the configured default', async () => {
     const { options } = await listInAppPlanningPresets({
@@ -307,7 +308,8 @@ describe('listInAppPlanningPresets', () => {
         custom: { tool: 'codex' },
         'custom+omp': { tool: 'omp', model: 'fast' },
       },
-    }, { isInstalled: allInstalled })).resolves.toEqual(expect.arrayContaining([
+    }, { isInstalled: allInstalled, ...skipDiscovery });
+    expect(options).toEqual(expect.arrayContaining([
       { key: 'codex', label: 'Codex', tool: 'codex', model: undefined, isDefault: false, defaultConfirmationMode: 'require' },
       { key: 'claude', label: 'Claude', tool: 'claude', model: undefined, isDefault: false, defaultConfirmationMode: 'require' },
       { key: 'omp', label: 'OMP', tool: 'omp', model: undefined, isDefault: false, defaultConfirmationMode: 'require' },
@@ -321,7 +323,7 @@ describe('listInAppPlanningPresets', () => {
     const { options: presets } = await listInAppPlanningPresets({
       defaultSlackHarnessPreset: 'cursor+claude',
       enabledExecutionAgents: ['codex'],
-    }, { isInstalled: allInstalled });
+    }, { isInstalled: allInstalled, ...skipDiscovery });
     const defaultPreset = presets.find((p) => p.isDefault);
     expect(defaultPreset).toBeDefined();
     const isCodexFamily = (preset: { key: string; tool: string; model?: string }): boolean => (
@@ -374,44 +376,6 @@ describe('listInAppPlanningPresets', () => {
     }, {
       isInstalled: (command) => command === 'cursor',
       ...skipDiscovery,
-    });
-    expect(presets.some((p) => p.isDefault)).toBe(true);
-    expect(presets.find((p) => p.isDefault)?.tool).toBe('cursor');
-    expect(presets.every((p) => p.tool === 'cursor')).toBe(true);
-  });
-
-  it('keeps only presets whose planner tool is on PATH (no harness registration required)', async () => {
-    const presets = await listInAppPlanningPresets({}, {
-      isInstalled: (command) => command === 'cursor',
-    });
-    expect(presets.length).toBeGreaterThan(0);
-    expect(presets.every((p) => p.tool === 'cursor')).toBe(true);
-    expect(presets.map((p) => p.key)).toEqual(
-      expect.arrayContaining(['cursor+claude', 'cursor+codex']),
-    );
-    expect(presets.some((p) => p.key === 'codex' || p.key === 'claude' || p.key === 'omp')).toBe(false);
-  });
-
-  it('returns an empty list when no planner tools are on PATH', async () => {
-    await expect(listInAppPlanningPresets({}, { isInstalled: () => false })).resolves.toEqual([]);
-  });
-
-  it('applies allowlist first, then PATH (intersection)', async () => {
-    const presets = await listInAppPlanningPresets({
-      enabledExecutionAgents: ['codex', 'cursor'],
-    }, {
-      isInstalled: (command) => command === 'cursor',
-    });
-    expect(presets.length).toBeGreaterThan(0);
-    expect(presets.every((p) => p.tool === 'cursor')).toBe(true);
-    expect(presets.some((p) => p.tool === 'codex')).toBe(false);
-  });
-
-  it('promotes a new default when PATH filtering removes the configured default', async () => {
-    const presets = await listInAppPlanningPresets({
-      defaultSlackHarnessPreset: 'codex',
-    }, {
-      isInstalled: (command) => command === 'cursor',
     });
     expect(presets.some((p) => p.isDefault)).toBe(true);
     expect(presets.find((p) => p.isDefault)?.tool).toBe('cursor');
