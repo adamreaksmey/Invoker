@@ -78,29 +78,7 @@ invoker-cli install
 invoker-cli run plans/fixtures/hello-world.yaml --standalone
 ```
 
-`invoker-cli install` enables default workers (`pr-status`, `autofix`, `auto-approve`). It does **not** install skills or modify Cursor / Claude / Codex / OMP configs by default, and it skips Slack/machines. Interactive `invoker-cli setup` asks whether to wire those harnesses (default No); pass `--register-harnesses` to opt in without a prompt (`--yes` alone does not register). Setup still walks Slack and machines when you want them.
-
-To remove what install/setup added:
-
-```bash
-invoker-cli uninstall --dry-run   # plan + coverage only (no disk changes)
-invoker-cli uninstall             # interactive confirm, then clean integrations + home data + npm
-invoker-cli uninstall --yes       # same without prompt (required when stdin is not a TTY)
-invoker-cli uninstall --yes --keep-data   # keep config/DB/outputs; still clean integrations + npm
-invoker-cli uninstall --help      # flags, exit codes, and coverage table
-```
-
-| Flag | Effect |
-| --- | --- |
-| `--dry-run` | Print the deletion plan and coverage table; never mutates disk |
-| `--yes` | Skip the confirmation prompt (required in non-interactive shells) |
-| `--keep-data` | Skip Invoker home data purge; still remove integrations and global npm packages |
-
-**Coverage (supported):** `setup --register-harnesses` surgical MCP/skill/instruction entries (and leftover home skill cleanup); quick-install worker toggles; experimental planner MCP entry; current CLI home data (`config.json`, `.env`, DB, outputs) plus standalone `~/.invoker-cli` when present; global npm packages `@neko-catpital-labs/invoker-{cli,ui,slack,watcher}` (removed last).
-
-**Coverage (excluded):** desktop `scripts/install.sh` channels (DMG / AppImage / `.deb`) — listed in help/output, not removed. Other `~/.invoker/dev/*` profiles that are not the active CLI home are also out of scope.
-
-Prefer `invoker-cli uninstall` over headless `install-skills uninstall` (skills-only fallback). User-modified dedicated managed files are kept and reported as `kept (user-modified)`; shared host configs only lose Invoker-managed entries.
+`invoker-cli install` installs the first-party Invoker AI helper skills under `~/.invoker`, writes an MCP snippet at `~/.invoker/mcp-servers/invoker.json`, and enables default workers (`pr-status`, `autofix`, `auto-approve`). It does **not** modify Cursor / Claude / Codex / OMP configs by default, and it skips Slack/machines. Interactive `invoker-cli setup` asks whether to wire those harnesses (default No); pass `--register-harnesses` to opt in without a prompt (`--yes` alone does not register). Setup still walks Slack and machines when you want them.
 
 Or download the platform binary from GitHub Releases:
 
@@ -166,9 +144,9 @@ Tagged releases are configured to publish:
 - desktop `.dmg`, `.zip`, `.deb`, and `.AppImage`
 - `SHA256SUMS` covering release assets
 
-Packaged installs bundle the first-party Invoker AI helpers inside the app. Run `invoker-cli setup` (or System Setup in the desktop app) to optionally register harness MCP/skills (`--register-harnesses` or answer yes to the prompt) and to configure Slack / remote machines.
+Packaged installs bundle the first-party Invoker AI helpers inside the app. `invoker-cli install` already installs helper skills under `~/.invoker` and the MCP snippet; run `invoker-cli setup` (or System Setup in the desktop app) to optionally register harness MCP/skills (`--register-harnesses` or answer yes to the prompt) and to configure Slack / remote machines.
 
-Then, in Codex, Claude, Cursor, or OMP (after harness registration), ask in normal chat to plan and run durable work through Invoker. `invoker-chat-submit` plus MCP review/submit/status tools prepare a review, wait for one approval, submit, and watch without a slash command.
+Then, in Codex, Claude, Cursor, or OMP (after harness registration or a manual snippet merge), ask in normal chat to plan and run durable work through Invoker. `invoker-chat-submit` plus MCP review/submit/status tools prepare a review, wait for one approval, submit, and watch without a slash command.
 
 Explicit fallback:
 
