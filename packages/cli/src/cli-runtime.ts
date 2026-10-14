@@ -227,86 +227,20 @@ const noopBus: OrchestratorMessageBus = {
 };
 
 function usage(): string {
-  return [
-    'Usage:',
-    '  invoker-cli run <plan.yaml> [--live|--standalone] [--db-dir <path>] [--config <path>] [--json]',
-    '  invoker-cli query workflows [--status <status>] [--output text|json] [--standalone]',
-    '  invoker-cli query tasks [--workflow <id>] [--status <status>] [--output text|json] [--standalone]',
-    '  invoker-cli query workflow <id> [--output text|json]',
-    '  invoker-cli query task <id> [--output text|json]',
-    '  invoker-cli query capacity [--output text|json]',
-    '  invoker-cli wait <workflowId> [--max-wait-ms <ms>] [--poll-interval-ms <ms>]',
-    '  invoker-cli retry-task <taskId>',
-    '  invoker-cli retry <workflowId>',
-    '  invoker-cli resume <workflowId>',
-    '  invoker-cli retry-tasks --status <status> [--parallel N] [--dry-run]',
-    '  invoker-cli set <field> <taskId> <value...> [--force] [-- <value...>]',
-    '  invoker-cli delete <workflowId>',
-    '  invoker-cli delete-all',
-    '  invoker-cli owner serve',
-    '  invoker-cli doctor [--fix] [--json]',
-    '  invoker-cli install [--demo]',
-    '  invoker-cli uninstall [--dry-run] [--yes] [--keep-data]',
-    '  invoker-cli setup [planner|slack] [--check|--from-env] [--yes] [--json]',
-    '  invoker-cli mcp',
-    '  invoker-cli worker [autofix|list]',
-    '  invoker-cli worker toggles [--enable <id>|--disable <id> ...]',
-    '  invoker-cli run-worker <kind> -- <args...>',
-    '  invoker-cli spend-gate [status|reset]',
-    '  invoker-cli auto-approve-authors [--json] [--set <login...>|--add <login>|--add-current-github-user|--clear]',
-    '  invoker-cli --help',
-    '  invoker-cli --version',
-    '',
-    'Commands:',
-    '  run <plan.yaml>  Submit to a live Invoker owner when available, otherwise run standalone.',
-    '  query workflows|tasks  Read workflows or tasks from a live owner, or from a read-only database view with --standalone.',
-    '  query workflow|task <id>  Read one workflow or task from a live owner.',
-    '  query capacity  Show live pool/member slot usage, queue depth by workflow, and the oldest-waiting task. Requires a live owner.',
-    '  wait <workflowId>  Park until a live-owner workflow settles, then print one INVOKER_WAKE line.',
-    '  retry-task <taskId>  Ask a live Invoker owner to retry one task.',
-    '  retry <workflowId>  Ask a live Invoker owner to retry a workflow.',
-    '  resume <workflowId> Ask a live Invoker owner to resume a workflow.',
-    '  retry-tasks --status <status>  Retry all tasks matching a status through a live owner.',
-    `  set <field> <taskId> <value...>  Edit one task field through a live owner. Fields: ${CLI_SET_FIELDS.join(', ')}. Refuses terminal tasks, running tasks without --force, and pool or executor changes the task's runner kind cannot take.`,
-    '  delete-all      Ask a live Invoker owner to delete all workflows. Runs unconditionally; the owner snapshots the DB first.',
-    '  owner serve     Start a headless Invoker owner process.',
-    '  doctor          Validate tools, config, and your default planning preset.',
-    '  install         Quick-install: global cli+ui, doctor --fix, skills+MCP, default workers. Skips Slack/machines.',
-    '  uninstall       Remove Invoker-owned integrations, home data, and global npm packages. Flags: --dry-run, --yes, --keep-data. Run `invoker-cli uninstall --help` for exit codes and coverage.',
-    '  setup [planner|slack]  Run the setup wizard, or directly configure planner MCP or Slack.',
-    '  mcp             Start the Invoker MCP stdio server.',
-    '  worker [kind|list]  Run a registry-selected worker or list available worker kinds.',
-    '  worker toggles      Show or set owner worker on/off (pr-status, autofix, PR maintenance, e2e auto-fix, worker-session-mine, codex-spend-clamp, idle-task-cleanup) and policy flags (auto-approve, disk-headroom cleanup).',
-    '  spend-gate      Show or clear the Codex daily-spend shutoff. While tripped, every Codex request fails; `reset` reopens it after you review the sessions.',
-    '  auto-approve-authors  Show or set GitHub logins in config.json that auto-approve may act on. Does not enable the auto-approve toggle.',
-    '',
-    'Options:',
-    '  --planner-url <url>   Planner service URL for `setup planner`.',
-    '  --access-token <tok>  Planner service access token for `setup planner`.',
-    `  --planner-package <spec>  Planner MCP package spec for \`setup planner\`. Defaults to ${DEFAULT_DRAFTER_MCP_PACKAGE_SPEC}.`,
-    '  --target <path>       MCP config path for planner setup. Defaults to ~/.invoker/mcp.json.',
-    '  --uninstall           Remove the experimental planner MCP entry and disable its Invoker flag.',
-    '  --live           Require a running Invoker owner and submit over IPC.',
-    '  --standalone     Skip IPC for `run` or `query` and use an isolated/configured CLI database.',
-    '  --db-dir <path>  Runtime database directory. Defaults to ~/.invoker-cli',
-    '  --config <path>  Optional config path reserved for CLI runtime configuration.',
-    '  --json           Emit only a machine-readable result summary on stdout.',
-    '  --workflow <id>  Restrict `query tasks` to one workflow.',
-    '  --status <status>  Restrict `query workflows` or `query tasks` to one status.',
-    '  --max-wait-ms <ms>  Maximum park time for `wait`. Defaults to 86400000 (24h).',
-    '  --poll-interval-ms <ms>  Query interval for `wait`. Defaults to 5000.',
-    '  --parallel N    Maximum concurrent mutation requests for `retry-tasks`. Defaults to 8.',
-    '  --dry-run       For `retry-tasks`: print matching task IDs without mutating. For `uninstall`: print the deletion plan and coverage without mutating disk.',
-    '  --yes           For `uninstall` / `setup`: skip confirmation prompts (`uninstall` requires this when stdin is not a TTY).',
-    '  --keep-data     For `uninstall`: skip Invoker home data purge; still remove integrations and global npm packages.',
-    '  --force         Let `set` edit a running task; the owner cancels the launched attempt first.',
-    '  --              End `set` options; later arguments are passed as values even if they start with --.',
-    '  --output <fmt>   Query output format. Supported values: text, json. Defaults to text.',
-    '  --from-env       Run Slack setup from SLACK_* environment values without prompts.',
-    '  --fix            Best-effort install of missing doctor tools.',
-    '  --help           Show this help text (or `invoker-cli uninstall --help` for uninstall coverage).',
-    '  --version        Show the CLI version.',
-  ].join('\n');
+  return formatRootHelp();
+}
+
+function maybeThrowArgvHelp(argv: readonly string[]): void {
+  if (!argv.some(isHelpFlag)) return;
+  const withoutHelp = argv.filter((arg) => !isHelpFlag(arg));
+  if (withoutHelp.length === 0) {
+    throw new CliHelpSignal(usage());
+  }
+  const commandId = resolveHelpCommandId(withoutHelp);
+  if (!commandId) {
+    throw new CliHelpSignal(usage());
+  }
+  throwCommandHelp(commandId);
 }
 
 function parseArgs(argv: string[]): { command?: string; planPath?: string; options: CliOptions } {
@@ -1626,8 +1560,17 @@ export async function main(argv: string[] = process.argv.slice(2), deps: CliDeps
     if (argv[0] === 'install') {
       return await runInstall(argv.slice(1));
     }
-    if (argv[0] === 'uninstall') {
-      return await runUninstall(argv.slice(1));
+    if (
+      argv[0]
+      && argv[0] !== '--help'
+      && argv[0] !== '-h'
+      && argv[0] !== '--version'
+      && argv[0] !== '-v'
+    ) {
+      maybeThrowArgvHelp(argv);
+    }
+    if (argv[0] === 'doctor') {
+      return runDoctor(argv.slice(1));
     }
     if (argv[0] === 'setup') {
       return await runSetup(argv.slice(1));
