@@ -260,6 +260,9 @@ function writeSkillsInstallReport(
   for (const skillName of status.bundledSkillNames) {
     process.stdout.write(`- ${status.managedPrefix}${skillName}\n`);
   }
+  if (mode !== 'uninstall') {
+    process.stdout.write(`${HARNESS_REGISTRATION_HINT}\n`);
+  }
   if (status.lastInstallError) {
     process.stderr.write(`Install note: ${status.lastInstallError}\n`);
   }

@@ -1154,9 +1154,9 @@ function resolveStandaloneSkillsRoot(): string | null {
 
 function printBundledSkillsResult(io: SetupIO, status: ReturnType<typeof installBundledSkills>): void {
   const installedTargets = status.targets.filter((target) => target.installed).map((target) => target.name);
-  const installedMcp = status.mcpTargets.filter((target) => target.installed).map((target) => target.name);
-  io.print(`Skills: installed ${status.bundledSkillNames.length} bundled skill(s) for ${installedTargets.join(', ') || 'no targets'}.`);
-  io.print(`Skills MCP: registered invoker-cli mcp for ${installedMcp.join(', ') || 'no detected harnesses'}.`);
+  io.print(`Skills: installed ${status.bundledSkillNames.length} bundled skill(s) under Invoker home (${installedTargets.join(', ') || 'no targets'}).`);
+  io.print(`Skills MCP: wrote Invoker MCP snippet only (no Cursor/Claude/Codex/OMP config changes).`);
+  io.print(`Skills MCP: ${HARNESS_REGISTRATION_HINT}`);
   if (status.lastInstallError) {
     io.print(`Skills: install note — ${status.lastInstallError}`);
   }

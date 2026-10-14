@@ -74,11 +74,12 @@ describe('bundled-skills', () => {
         isInstalled: allHarnessesInstalled,
       });
 
-      expect(status.commandTargets).toHaveLength(4);
+      expect(status.commandTargets).toHaveLength(1);
+      expect(status.commandTargets[0]?.id).toBe('invoker');
       expect(status.commandTargets.every((target) => !target.installed)).toBe(true);
       expect(status.commandTargets.every((target) => !target.upToDate)).toBe(true);
-      expect(status.targets).toHaveLength(4);
-      expect(status.targets.map((target) => target.id).sort()).toEqual(['claude', 'codex', 'cursor', 'omp']);
+      expect(status.targets).toHaveLength(1);
+      expect(status.targets[0]?.id).toBe('invoker');
       expect(status.mcpTargets).toHaveLength(4);
       expect(status.mcpTargets.every((target) => !target.installed)).toBe(true);
       expect(status.mcpTargets.every((target) => !target.upToDate)).toBe(true);
@@ -134,7 +135,7 @@ describe('bundled-skills', () => {
     }
   });
 
-  it('default install writes no home or harness skill copies', () => {
+  it('installs prefixed skill copies under Invoker home only and leaves harness configs untouched', () => {
     const resourcesRoot = makeTempRoot('invoker-bundled-resources-');
     const invokerHomeRoot = makeTempRoot('invoker-bundled-home-');
     const repoRoot = makeTempRoot('invoker-bundled-repo-');
@@ -157,9 +158,12 @@ describe('bundled-skills', () => {
         isInstalled: allHarnessesInstalled,
       });
 
-      expect(existsSync(join(invokerHomeRoot, 'skills'))).toBe(false);
-      expect(existsSync(join(invokerHomeRoot, 'commands'))).toBe(false);
-      expect(existsSync(join(invokerHomeRoot, 'mcp-servers', 'invoker.json'))).toBe(false);
+      expect(existsSync(join(invokerHomeRoot, 'skills', 'invoker-plan-to-invoker', 'SKILL.md'))).toBe(true);
+      expect(existsSync(join(invokerHomeRoot, 'skills', 'invoker-make-pr', 'scripts', 'check.sh'))).toBe(true);
+      expect(existsSync(join(invokerHomeRoot, 'commands', 'invoker-plan-to-invoker.md'))).toBe(true);
+      expect(existsSync(join(invokerHomeRoot, 'commands', 'invoker-loop-generator.md'))).toBe(true);
+      const snippet = JSON.parse(readFileSync(join(invokerHomeRoot, 'mcp-servers', 'invoker.json'), 'utf-8'));
+      expect(snippet.mcpServers.invoker).toEqual({ type: 'stdio', command: 'invoker-cli', args: ['mcp'] });
 
       for (const harnessPath of [
         join(fakeHome, '.codex', 'skills'),
@@ -175,13 +179,26 @@ describe('bundled-skills', () => {
         expect(existsSync(harnessPath)).toBe(false);
       }
 
-      expect(installed.targets).toHaveLength(4);
-      expect(installed.commandTargets).toHaveLength(4);
-      expect(installed.targets.every((target) => !target.installed)).toBe(true);
-      expect(installed.commandTargets.every((target) => !target.installed)).toBe(true);
+      expect(installed.targets).toHaveLength(1);
+      expect(installed.commandTargets).toHaveLength(1);
+      expect(installed.targets.every((target) => target.installed)).toBe(true);
+      expect(installed.targets.every((target) => target.upToDate)).toBe(true);
+      expect(installed.commandTargets.every((target) => target.installed)).toBe(true);
+      expect(installed.commandTargets.every((target) => target.upToDate)).toBe(true);
       expect(installed.mcpTargets.every((target) => !target.installed)).toBe(true);
       expect(installed.instructionTargets?.every((target) => !target.installed)).toBe(true);
-      expect(installed.promptRecommended).toBe(true);
+      expect(installed.promptRecommended).toBe(false);
+
+      const status = resolveBundledSkillsStatus({
+        isPackaged: true,
+        repoRoot,
+        resourcesPath: resourcesRoot,
+        invokerHomeRoot,
+        isInstalled: allHarnessesInstalled,
+      });
+      expect(status.targets.every((target) => target.upToDate)).toBe(true);
+      expect(status.commandTargets.every((target) => target.upToDate)).toBe(true);
+      expect(status.promptRecommended).toBe(false);
     } finally {
       if (originalHome === undefined) {
         delete process.env.HOME;
@@ -191,7 +208,7 @@ describe('bundled-skills', () => {
     }
   });
 
-  it('re-running default install stays idempotent and never writes skills or MCP', () => {
+  it('re-running install is idempotent for the Invoker MCP snippet', () => {
     const resourcesRoot = makeTempRoot('invoker-bundled-resources-');
     const invokerHomeRoot = makeTempRoot('invoker-bundled-home-');
     const repoRoot = makeTempRoot('invoker-bundled-repo-');
@@ -206,8 +223,9 @@ describe('bundled-skills', () => {
       installBundledSkills(deps);
       installBundledSkills(deps);
 
-      expect(existsSync(join(invokerHomeRoot, 'skills'))).toBe(false);
-      expect(existsSync(join(invokerHomeRoot, 'mcp-servers', 'invoker.json'))).toBe(false);
+      const snippetPath = join(invokerHomeRoot, 'mcp-servers', 'invoker.json');
+      const first = readFileSync(snippetPath, 'utf-8');
+      expect(JSON.parse(first).mcpServers.invoker).toEqual({ type: 'stdio', command: 'invoker-cli', args: ['mcp'] });
       expect(existsSync(join(fakeHome, '.codex', 'config.toml'))).toBe(false);
     } finally {
       if (originalHome === undefined) {
@@ -242,7 +260,7 @@ describe('bundled-skills', () => {
       });
 
       expect(readFileSync(configPath, 'utf-8')).toBe(preExisting);
-      expect(existsSync(join(invokerHomeRoot, 'skills'))).toBe(false);
+      expect(existsSync(join(invokerHomeRoot, 'mcp-servers', 'invoker.json'))).toBe(true);
     } finally {
       if (originalHome === undefined) {
         delete process.env.HOME;
@@ -292,7 +310,7 @@ describe('bundled-skills', () => {
       });
       const codexTarget = installed.mcpTargets.find((target) => target.id === 'codex');
       expect(readFileSync(configPath, 'utf-8')).toBe(mismatched);
-      expect(existsSync(join(invokerHomeRoot, 'mcp-servers', 'invoker.json'))).toBe(false);
+      expect(existsSync(join(invokerHomeRoot, 'mcp-servers', 'invoker.json'))).toBe(true);
       expect(codexTarget?.installed).toBe(false);
     } finally {
       if (originalHome === undefined) {
@@ -303,7 +321,7 @@ describe('bundled-skills', () => {
     }
   });
 
-  it('default install leaves the OMP agent skill root untouched', () => {
+  it('installs skills under Invoker home instead of the OMP agent skill root', () => {
     const resourcesRoot = makeTempRoot('invoker-bundled-resources-');
     const invokerHomeRoot = makeTempRoot('invoker-bundled-home-');
     const repoRoot = makeTempRoot('invoker-bundled-repo-');
@@ -323,12 +341,13 @@ describe('bundled-skills', () => {
         isInstalled: onlyOmpInstalled,
       });
 
-      expect(existsSync(join(invokerHomeRoot, 'skills'))).toBe(false);
+      expect(existsSync(join(invokerHomeRoot, 'skills', 'invoker-make-pr', 'SKILL.md'))).toBe(true);
       expect(existsSync(join(ompHome, '.omp', 'agent', 'skills', 'invoker-make-pr', 'SKILL.md'))).toBe(false);
 
-      const ompTarget = installed.targets.find((target) => target.id === 'omp');
-      expect(ompTarget?.path).toBe(join(ompHome, '.omp', 'agent', 'skills'));
-      expect(ompTarget?.installed).toBe(false);
+      const invokerTarget = installed.targets.find((target) => target.id === 'invoker');
+      expect(invokerTarget?.path).toBe(join(invokerHomeRoot, 'skills'));
+      expect(invokerTarget?.installed).toBe(true);
+      expect(invokerTarget?.upToDate).toBe(true);
     } finally {
       if (originalHome === undefined) {
         delete process.env.HOME;
@@ -407,7 +426,7 @@ describe('bundled-skills', () => {
     }
   });
 
-  it('skips invalid OMP MCP JSON without rewriting it', () => {
+  it('succeeds when harness MCP JSON is invalid because it no longer reads those files', () => {
     const resourcesRoot = makeTempRoot('invoker-bundled-resources-');
     const invokerHomeRoot = makeTempRoot('invoker-bundled-home-');
     const repoRoot = makeTempRoot('invoker-bundled-repo-');
@@ -424,8 +443,8 @@ describe('bundled-skills', () => {
 
       const installed = packagedInstall(resourcesRoot, repoRoot, invokerHomeRoot);
       expect(readFileSync(mcpPath, 'utf-8')).toBe('[]');
-      expect(installed.lastInstallError).toBe(`Invalid MCP config at ${mcpPath}: expected a JSON object`);
-      expect(existsSync(join(fakeHome, '.omp', 'agent', 'skills', 'invoker-plan-to-invoker', 'SKILL.md'))).toBe(true);
+      expect(installed.lastInstallError).toBeUndefined();
+      expect(existsSync(join(invokerHomeRoot, 'skills', 'invoker-plan-to-invoker', 'SKILL.md'))).toBe(true);
     } finally {
       if (originalHome === undefined) {
         delete process.env.HOME;
@@ -435,7 +454,7 @@ describe('bundled-skills', () => {
     }
   });
 
-  it('skips malformed OMP MCP JSON without rewriting it', () => {
+  it('succeeds when harness MCP JSON is malformed because it no longer reads those files', () => {
     const resourcesRoot = makeTempRoot('invoker-bundled-resources-');
     const invokerHomeRoot = makeTempRoot('invoker-bundled-home-');
     const repoRoot = makeTempRoot('invoker-bundled-repo-');
@@ -452,8 +471,8 @@ describe('bundled-skills', () => {
 
       const installed = packagedInstall(resourcesRoot, repoRoot, invokerHomeRoot);
       expect(readFileSync(mcpPath, 'utf-8')).toBe('{"mcpServers":');
-      expect(installed.lastInstallError).toBe(`Invalid MCP config at ${mcpPath}: expected a JSON object`);
-      expect(existsSync(join(fakeHome, '.omp', 'agent', 'skills', 'invoker-plan-to-invoker', 'SKILL.md'))).toBe(true);
+      expect(installed.lastInstallError).toBeUndefined();
+      expect(existsSync(join(invokerHomeRoot, 'skills', 'invoker-plan-to-invoker', 'SKILL.md'))).toBe(true);
     } finally {
       if (originalHome === undefined) {
         delete process.env.HOME;
@@ -463,7 +482,7 @@ describe('bundled-skills', () => {
     }
   });
 
-  it('skips a bad Cursor MCP file and still registers other harnesses', () => {
+  it('leaves a bad Cursor MCP file untouched and still installs under Invoker home', () => {
     const resourcesRoot = makeTempRoot('invoker-bundled-resources-');
     const invokerHomeRoot = makeTempRoot('invoker-bundled-home-');
     const repoRoot = makeTempRoot('invoker-bundled-repo-');
@@ -479,13 +498,10 @@ describe('bundled-skills', () => {
 
       const installed = packagedInstall(resourcesRoot, repoRoot, invokerHomeRoot, allHarnessesInstalled);
       expect(readFileSync(cursorMcpPath, 'utf-8')).toBe('[]');
-      expect(installed.lastInstallError).toBe(`Invalid MCP config at ${cursorMcpPath}: expected a JSON object`);
-      const ompMcp = JSON.parse(readFileSync(join(fakeHome, '.omp', 'agent', 'mcp.json'), 'utf-8'));
-      expect(ompMcp.mcpServers.invoker).toEqual({ type: 'stdio', command: 'invoker-cli', args: ['mcp'] });
-      const claudeMcp = JSON.parse(readFileSync(join(fakeHome, '.claude.json'), 'utf-8'));
-      expect(claudeMcp.mcpServers.invoker).toEqual({ type: 'stdio', command: 'invoker-cli', args: ['mcp'] });
-      expect(installed.mcpTargets.find((target) => target.id === 'cursor')?.installed).toBe(false);
-      expect(installed.mcpTargets.find((target) => target.id === 'omp')?.installed).toBe(true);
+      expect(installed.lastInstallError).toBeUndefined();
+      expect(existsSync(join(invokerHomeRoot, 'skills', 'invoker-plan-to-invoker', 'SKILL.md'))).toBe(true);
+      expect(existsSync(join(fakeHome, '.omp', 'agent', 'mcp.json'))).toBe(false);
+      expect(existsSync(join(fakeHome, '.claude.json'))).toBe(false);
     } finally {
       if (originalHome === undefined) {
         delete process.env.HOME;
@@ -570,7 +586,7 @@ describe('bundled-skills', () => {
     }
   });
 
-  it('records the source checkout in the manifest for the unpackaged CLI install, so installed doctor scripts outside any git repo can still resolve their Invoker checkout via the home manifest', () => {
+  it('records the source checkout in the manifest for the unpackaged CLI install, so installed doctor scripts outside any git repo (e.g. ~/.invoker/skills/invoker-plan-to-invoker/scripts) can still resolve their Invoker checkout', () => {
     const invokerHomeRoot = makeTempRoot('invoker-bundled-home-');
     const repoRoot = makeTempRoot('invoker-bundled-repo-');
     const cliHome = makeTempRoot('invoker-cli-home-');
@@ -759,7 +775,7 @@ describe('bundled-skills', () => {
         isInstalled: allHarnessesInstalled,
       });
 
-      expect(existsSync(join(invokerHomeRoot, 'skills'))).toBe(false);
+      expect(existsSync(join(invokerHomeRoot, 'skills', 'invoker-plan-to-invoker', 'SKILL.md'))).toBe(true);
       expect(existsSync(join(fakeHome, '.cursor', 'skills', 'invoker-plan-to-invoker', 'SKILL.md'))).toBe(false);
       expect(existsSync(join(fakeHome, '.cursor', 'rules', 'invoker-execution-precedence.mdc'))).toBe(false);
       expect(readFileSync(join(fakeHome, '.codex', 'AGENTS.md'), 'utf-8')).toBe('# Personal rules\n\nKeep me.\n');
@@ -775,54 +791,7 @@ describe('bundled-skills', () => {
     }
   });
 
-  it('registerHarnesses writes MCP/skills into detected harnesses', () => {
-    const resourcesRoot = makeTempRoot('invoker-bundled-resources-');
-    const invokerHomeRoot = makeTempRoot('invoker-bundled-home-');
-    const repoRoot = makeTempRoot('invoker-bundled-repo-');
-    const fakeHome = makeTempRoot('invoker-register-home-');
-    const originalHome = process.env.HOME;
-    process.env.HOME = fakeHome;
-
-    try {
-      writeSkill(resourcesRoot, 'plan-to-invoker');
-      writePlanToInvokerCommands(resourcesRoot);
-
-      const installed = installBundledSkills(
-        {
-          isPackaged: true,
-          repoRoot,
-          resourcesPath: resourcesRoot,
-          invokerHomeRoot,
-          isInstalled: allHarnessesInstalled,
-        },
-        'install',
-        'all',
-        { registerHarnesses: true },
-      );
-
-      expect(existsSync(join(invokerHomeRoot, 'skills'))).toBe(false);
-      expect(existsSync(join(fakeHome, '.cursor', 'skills', 'invoker-plan-to-invoker', 'SKILL.md'))).toBe(true);
-      expect(existsSync(join(fakeHome, '.cursor', 'commands', 'invoker-plan-to-invoker.md'))).toBe(true);
-      expect(existsSync(join(fakeHome, '.cursor', 'mcp.json'))).toBe(true);
-      expect(JSON.parse(readFileSync(join(fakeHome, '.cursor', 'mcp.json'), 'utf-8')).mcpServers.invoker).toEqual({
-        type: 'stdio',
-        command: 'invoker-cli',
-        args: ['mcp'],
-      });
-      expect(existsSync(join(fakeHome, '.cursor', 'rules', 'invoker-execution-precedence.mdc'))).toBe(true);
-      expect(installed.targets.some((target) => target.id === 'cursor' && target.installed)).toBe(true);
-      expect(installed.mcpTargets.some((target) => target.id === 'cursor' && target.installed)).toBe(true);
-      expect(installed.instructionTargets?.some((target) => target.id === 'cursor' && target.installed)).toBe(true);
-    } finally {
-      if (originalHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = originalHome;
-      }
-    }
-  });
-
-  it('uninstall reverses harness registration and leftover home artifacts', () => {
+  it('uninstall reverses Invoker-home writes and leaves unrelated harness files', () => {
     const resourcesRoot = makeTempRoot('invoker-bundled-resources-');
     const invokerHomeRoot = makeTempRoot('invoker-bundled-home-');
     const repoRoot = makeTempRoot('invoker-bundled-repo-');
@@ -845,21 +814,14 @@ describe('bundled-skills', () => {
         invokerHomeRoot,
         isInstalled: allHarnessesInstalled,
       };
-      installBundledSkills(deps, 'install', 'all', { registerHarnesses: true });
-      expect(existsSync(join(fakeHome, '.cursor', 'skills', 'invoker-plan-to-invoker', 'SKILL.md'))).toBe(true);
-      expect(existsSync(join(invokerHomeRoot, 'skills'))).toBe(false);
-      mkdirSync(join(invokerHomeRoot, 'mcp-servers'), { recursive: true });
-      writeFileSync(
-        join(invokerHomeRoot, 'mcp-servers', 'invoker.json'),
-        `${JSON.stringify({ mcpServers: { invoker: { type: 'stdio', command: 'invoker-cli', args: ['mcp'] } } }, null, 2)}\n`,
-      );
-      mkdirSync(join(invokerHomeRoot, 'skills', 'invoker-plan-to-invoker'), { recursive: true });
-      writeFileSync(join(invokerHomeRoot, 'skills', 'invoker-plan-to-invoker', 'SKILL.md'), 'leftover\n');
+      installBundledSkills(deps);
+      expect(existsSync(join(invokerHomeRoot, 'skills', 'invoker-plan-to-invoker', 'SKILL.md'))).toBe(true);
+      expect(existsSync(join(invokerHomeRoot, 'mcp-servers', 'invoker.json'))).toBe(true);
 
       const uninstalled = installBundledSkills(deps, 'uninstall');
 
-      expect(existsSync(join(invokerHomeRoot, 'skills'))).toBe(false);
-      expect(existsSync(join(fakeHome, '.cursor', 'skills', 'invoker-plan-to-invoker', 'SKILL.md'))).toBe(false);
+      expect(existsSync(join(invokerHomeRoot, 'skills', 'invoker-plan-to-invoker', 'SKILL.md'))).toBe(false);
+      expect(existsSync(join(invokerHomeRoot, 'commands', 'invoker-plan-to-invoker.md'))).toBe(false);
       expect(existsSync(join(invokerHomeRoot, 'mcp-servers', 'invoker.json'))).toBe(false);
       expect(existsSync(join(invokerHomeRoot, 'bundled-skills.json'))).toBe(false);
       expect(existsSync(join(fakeHome, '.cursor', 'skills-cursor', 'invoker-plan-to-invoker', 'SKILL.md'))).toBe(false);
@@ -876,66 +838,7 @@ describe('bundled-skills', () => {
     }
   });
 
-  it('returns install status when Codex config.toml is a directory instead of a file', () => {
-    const resourcesRoot = makeTempRoot('invoker-bundled-resources-');
-    const invokerHomeRoot = makeTempRoot('invoker-bundled-home-');
-    const repoRoot = makeTempRoot('invoker-bundled-repo-');
-    const fakeHome = makeTempRoot('invoker-codex-toml-dir-home-');
-    const originalHome = process.env.HOME;
-    process.env.HOME = fakeHome;
-
-    try {
-      writeSkill(resourcesRoot, 'plan-to-invoker');
-      writePlanToInvokerCommands(resourcesRoot);
-      mkdirSync(join(fakeHome, '.codex', 'config.toml'), { recursive: true });
-
-      const installed = packagedInstall(resourcesRoot, repoRoot, invokerHomeRoot, allHarnessesInstalled);
-
-      expect(installed.available).toBe(true);
-      expect(installed.targets.every((target) => target.installed)).toBe(true);
-      expect(installed.lastInstallError).toMatch(/EISDIR|directory/i);
-      expect(installed.mcpTargets.find((target) => target.id === 'codex')?.installed).toBe(false);
-      expect(existsSync(join(fakeHome, '.cursor', 'skills', 'invoker-plan-to-invoker', 'SKILL.md'))).toBe(true);
-    } finally {
-      if (originalHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = originalHome;
-      }
-    }
-  });
-
-  it('reports Cursor rule absent when the rule path is a directory', () => {
-    const resourcesRoot = makeTempRoot('invoker-bundled-resources-');
-    const invokerHomeRoot = makeTempRoot('invoker-bundled-home-');
-    const repoRoot = makeTempRoot('invoker-bundled-repo-');
-    const fakeHome = makeTempRoot('invoker-cursor-rule-dir-home-');
-    const originalHome = process.env.HOME;
-    process.env.HOME = fakeHome;
-
-    try {
-      writeSkill(resourcesRoot, 'plan-to-invoker');
-      mkdirSync(join(fakeHome, '.cursor', 'rules', 'invoker-execution-precedence.mdc'), { recursive: true });
-
-      const status = resolveBundledSkillsStatus({
-        isPackaged: true,
-        repoRoot,
-        resourcesPath: resourcesRoot,
-        invokerHomeRoot,
-        isInstalled: allHarnessesInstalled,
-      });
-
-      expect(status.instructionTargets?.find((target) => target.id === 'cursor')?.installed).toBe(false);
-    } finally {
-      if (originalHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = originalHome;
-      }
-    }
-  });
-
-  it('skips invalid Claude settings.json without rewriting it', () => {
+  it('leaves invalid Claude settings.json untouched because default install never opens it', () => {
     const resourcesRoot = makeTempRoot('invoker-bundled-resources-');
     const invokerHomeRoot = makeTempRoot('invoker-bundled-home-');
     const repoRoot = makeTempRoot('invoker-bundled-repo-');
@@ -951,8 +854,8 @@ describe('bundled-skills', () => {
 
       const installed = packagedInstall(resourcesRoot, repoRoot, invokerHomeRoot, allHarnessesInstalled);
       expect(readFileSync(settingsPath, 'utf-8')).toBe('[]');
-      expect(installed.lastInstallError).toBe(`Invalid Claude settings at ${settingsPath}: expected a JSON object`);
-      expect(existsSync(join(fakeHome, '.cursor', 'rules', 'invoker-execution-precedence.mdc'))).toBe(true);
+      expect(installed.lastInstallError).toBeUndefined();
+      expect(existsSync(join(invokerHomeRoot, 'skills', 'invoker-plan-to-invoker', 'SKILL.md'))).toBe(true);
     } finally {
       if (originalHome === undefined) {
         delete process.env.HOME;
@@ -988,7 +891,7 @@ describe('bundled-skills', () => {
         isInstalled: allHarnessesInstalled,
       });
       expect(status.instructionTargets?.every((target) => !target.installed)).toBe(true);
-      expect(status.targets.every((target) => !target.installed)).toBe(true);
+      expect(status.targets.every((target) => target.installed && target.upToDate)).toBe(true);
     } finally {
       if (originalHome === undefined) {
         delete process.env.HOME;
