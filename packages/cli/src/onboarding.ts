@@ -1152,17 +1152,37 @@ function resolveStandaloneSkillsRoot(): string | null {
   return existsSync(join(candidate, 'skills')) ? candidate : null;
 }
 
-function printBundledSkillsResult(io: SetupIO, status: ReturnType<typeof installBundledSkills>): void {
+function printBundledSkillsResult(
+  io: SetupIO,
+  status: ReturnType<typeof installBundledSkills>,
+  registeredHarnesses: boolean,
+): void {
   const installedTargets = status.targets.filter((target) => target.installed).map((target) => target.name);
   io.print(`Skills: installed ${status.bundledSkillNames.length} bundled skill(s) under Invoker home (${installedTargets.join(', ') || 'no targets'}).`);
-  io.print(`Skills MCP: wrote Invoker MCP snippet only (no Cursor/Claude/Codex/OMP config changes).`);
-  io.print(`Skills MCP: ${HARNESS_REGISTRATION_HINT}`);
+  if (registeredHarnesses) {
+    const registeredMcp = (status.mcpTargets ?? []).filter((target) => target.installed).map((target) => target.name);
+    io.print(
+      registeredMcp.length > 0
+        ? `Skills MCP: registered into ${registeredMcp.join(', ')}.`
+        : 'Skills MCP: harness registration requested, but no available harness MCP targets were updated.',
+    );
+  } else {
+    io.print(`Skills MCP: wrote Invoker MCP snippet only (no Cursor/Claude/Codex/OMP config changes).`);
+    io.print(`Skills MCP: ${HARNESS_REGISTRATION_HINT}`);
+  }
   if (status.lastInstallError) {
     io.print(`Skills: install note — ${status.lastInstallError}`);
   }
 }
 
-export function installSetupBundledSkills(io: SetupIO, options: SetupDeps): void {
+const HARNESS_REGISTER_PROMPT =
+  'Wire Invoker MCP/skills into detected harnesses (Cursor/Claude/Codex/OMP)? [y/N] ';
+
+export function installSetupBundledSkills(
+  io: SetupIO,
+  options: SetupDeps,
+  installOptions: { registerHarnesses?: boolean } = {},
+): void {
   const resolveSkillsRepoRoot = options.resolveSkillsRepoRoot ?? resolveRepoRoot;
   const resolveStandaloneRoot = options.resolveStandaloneSkillsRoot ?? resolveStandaloneSkillsRoot;
   const install = options.bundledSkillsInstall ?? installBundledSkills;
@@ -1180,7 +1200,11 @@ export function installSetupBundledSkills(io: SetupIO, options: SetupDeps): void
 
   const registerHarnesses = installOptions.registerHarnesses === true;
   try {
-    printBundledSkillsResult(io, install({ isPackaged: false, repoRoot }));
+    printBundledSkillsResult(
+      io,
+      install({ isPackaged: false, repoRoot }, 'install', 'all', { registerHarnesses }),
+      registerHarnesses,
+    );
   } catch (error) {
     io.print(`Skills: install skipped — ${formatCaughtException(error)}`);
   }

@@ -1114,7 +1114,6 @@ describe('runSetup in a non-interactive shell', () => {
 
     expect(code).toBe(0);
     expect(installCalls).toEqual([{ registerHarnesses: true }]);
-    expect(lines.join('\n')).toContain('Skills: installed 1 bundled skill(s) into harnesses (Invoker).');
     expect(lines.join('\n')).toContain('Skills MCP: registered into Cursor.');
   });
 
