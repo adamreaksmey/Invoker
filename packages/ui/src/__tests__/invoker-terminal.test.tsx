@@ -124,7 +124,6 @@ const { App } = await import('../App.js');
 const {
   InvokerTerminal,
   PLANNING_TOOLS_EMPTY_PATH_MESSAGE,
-  PLANNING_TURN_CANCELLED_MESSAGE,
   buildPlanningHarnessChoices,
 } = await import('../components/InvokerTerminal.js');
 
@@ -445,7 +444,7 @@ describe('Invoker terminal (component)', () => {
     expect(harness.querySelectorAll('option')).toHaveLength(0);
   });
 
-  it('announces the turn error in-thread and only renders Retry when a handler is provided', () => {
+  it('announces the turn error and only renders Retry when a handler is provided', () => {
     const { rerender } = render(<InvokerTerminal
       {...terminalProps({
         turnError: 'Planner was interrupted before it could answer.',

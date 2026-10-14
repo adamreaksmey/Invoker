@@ -82,7 +82,6 @@ import {
   type PlanningRepoPool,
 } from './planning-chat-worktree.js';
 import { commandIsOnPath } from './system-diagnostics.js';
-import { discoverCursorPlanningModels } from './cursor-model-discovery.js';
 
 function logPlanningWorktreeReadyError(sessionId: string, step: string, error: unknown): void {
   console.error(`[planning-chat] ensurePlanningWorktreeReady ${step} failed session="${sessionId}": ${
@@ -1026,18 +1025,11 @@ function applyCursorModelDiscovery(
  * dispatch — gets the same filtered view without double-filtering.
  * After the allowlist, presets whose planner `tool` is not on Invoker’s PATH
  * are dropped (injectable for tests; defaults to {@link commandIsOnPath}).
- * When Cursor is available, hybrid discovery intersects the curated manifest
- * with `cursor-agent --list-models` and appends non-curated ids under section "more".
  */
 export async function listInAppPlanningPresets(
   config: InvokerConfig,
-  opts?: {
-    isInstalled?: (command: string) => boolean;
-    refreshCursorModels?: boolean;
-    /** When true, skip live Cursor discovery (tests / fast path). */
-    skipCursorDiscovery?: boolean;
-  },
-): Promise<PlanningPresetsResponse> {
+  opts?: { isInstalled?: (command: string) => boolean },
+): Promise<PlanningPresetOption[]> {
   const isInstalled = opts?.isInstalled ?? commandIsOnPath;
   const presets = await resolveHarnessPresets(config);
   const defaultPresetKey = await resolveDefaultPresetKey(config);
@@ -1252,15 +1244,6 @@ export async function sendPlanningChatMessage(
       return { ok: false, sessionId: session.id, turnId, error: 'duplicate-turn' };
     }
     const sessionPresets = await resolveHarnessPresets(deps.config);
-    const presetSyncError = await syncPlanningSessionPreset(
-      session,
-      typeof rawRequest?.presetKey === 'string' ? rawRequest.presetKey : undefined,
-      sessionPresets,
-      deps,
-    );
-    if (presetSyncError) {
-      return { ok: false, sessionId: session.id, turnId, error: presetSyncError };
-    }
     const sessionPreset = sessionPresets[session.presetKey];
     if (!sessionPreset) {
       return {
