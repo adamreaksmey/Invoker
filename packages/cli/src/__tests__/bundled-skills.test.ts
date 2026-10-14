@@ -575,8 +575,8 @@ describe('bundled-skills', () => {
     process.env.HOME = cliHome;
 
     try {
-      writeSkill(repoRoot, 'plan-to-invoker');
-      writePlanToInvokerCommands(repoRoot);
+      writeSkill(join(repoRoot, 'corpus'), 'plan-to-invoker');
+      writePlanToInvokerCommands(join(repoRoot, 'corpus'));
 
       installBundledSkills({
         isPackaged: false,
@@ -587,6 +587,36 @@ describe('bundled-skills', () => {
 
       const manifest = JSON.parse(readFileSync(join(invokerHomeRoot, 'bundled-skills.json'), 'utf-8'));
       expect(manifest.sourceRepoRoot).toBe(repoRoot);
+      expect(existsSync(join(cliHome, '.codex', 'skills', 'invoker-plan-to-invoker', 'SKILL.md'))).toBe(true);
+    } finally {
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+    }
+  });
+
+  it('finds top-level repo skills for unpackaged runs when the rehomed corpus skill root is absent', () => {
+    const invokerHomeRoot = makeTempRoot('invoker-bundled-home-');
+    const repoRoot = makeTempRoot('invoker-bundled-repo-');
+    const cliHome = makeTempRoot('invoker-cli-home-');
+    const originalHome = process.env.HOME;
+    process.env.HOME = cliHome;
+
+    try {
+      writeSkill(repoRoot, 'plan-to-invoker');
+
+      const status = resolveBundledSkillsStatus({
+        isPackaged: false,
+        repoRoot,
+        invokerHomeRoot,
+        isInstalled: allHarnessesInstalled,
+      });
+
+      expect(status.available).toBe(true);
+      expect(status.sourcePath).toBe(join(repoRoot, 'skills'));
+      expect(status.bundledSkillNames).toEqual(['plan-to-invoker']);
     } finally {
       if (originalHome === undefined) {
         delete process.env.HOME;

@@ -19,7 +19,7 @@ import { TaskStateMachine } from './state-machine.js';
 import { ResponseHandler } from './response-handler.js';
 import type { ParsedResponse } from './response-handler.js';
 import { TaskScheduler } from './scheduler.js';
-import type { TaskState, TaskDelta, TaskStateChanges, TaskConfig, TaskExecution, Attempt, ExternalDependency, ExternalDependencyChange, DetachedExternalDependency, ExternalGatePolicy, TaskStatus, TaskHeartbeatSource, TaskFreshnessSpec } from '@invoker/workflow-graph';
+import type { TaskState, TaskDelta, TaskStateChanges, TaskConfig, TaskExecution, Attempt, ExternalDependency, ExternalDependencyChange, DetachedExternalDependency, ExternalGatePolicy, TaskStatus, TaskHeartbeatSource, TaskFreshnessSpec, ExecutionAgentSource } from '@invoker/workflow-graph';
 import type { RunnerKind } from '@invoker/workflow-graph';
 import { applyTaskConfigPatch, BUILT_IN_LOCAL_EXECUTION_POOL_ID, createTaskState, createAttempt, hasFailedDependencyPath, isCrashPreservedExecution, isLivenessFailureClass, computeWorkflowRollup } from '@invoker/workflow-graph';
 import type { WorkflowDerivedStatus } from '@invoker/workflow-graph';
@@ -476,6 +476,7 @@ export interface PlanDefinition {
     dockerImage?: string;
     poolId?: string;
     executionAgent?: string;
+    executionAgentSource?: ExecutionAgentSource;
     executionModel?: string;
     maxTurns?: number;
     priority?: number;
@@ -576,6 +577,7 @@ export interface GraphMutationNodeDef {
   poolId?: string;
   dockerImage?: string;
   executionAgent?: string;
+  executionAgentSource?: ExecutionAgentSource;
   executionModel?: string;
   maxTurns?: number;
   isReconciliation?: boolean;
@@ -599,6 +601,7 @@ export interface TaskReplacementDef {
   dependencies?: string[];
   runnerKind?: RunnerKind;
   executionAgent?: string;
+  executionAgentSource?: ExecutionAgentSource;
   executionModel?: string;
     maxTurns?: number;
 }
@@ -756,6 +759,7 @@ export interface OrchestratorConfig {
   availablePoolIds?: string[];
   /** Default pool applied to tasks that do not declare a pool and do not match a route rule. */
   defaultPoolId?: string;
+  forcePoolId?: string;
   /**
    * When true, keep tasks persisted as `pending` until the executor confirms
    * startup success, then transition to `running`.
@@ -809,6 +813,7 @@ export class Orchestrator {
   private readonly executorRoutingRules: ExecutorRoutingRule[];
   private readonly availablePoolIds: Set<string>;
   private readonly defaultPoolId: string | undefined;
+  private readonly forcePoolId: string | undefined;
   private readonly deferRunningUntilLaunch: boolean;
   private readonly launchDeferralBackoffMs?: number;
   private readonly resolveRepoDefaultBranch: (repoUrl: string) => string;
@@ -872,6 +877,7 @@ export class Orchestrator {
       ...(config.availablePoolIds ?? []),
     ]);
     this.defaultPoolId = config.defaultPoolId ?? BUILT_IN_LOCAL_EXECUTION_POOL_ID;
+    this.forcePoolId = config.forcePoolId;
     this.deferRunningUntilLaunch = config.deferRunningUntilLaunch ?? false;
     this.launchDeferralBackoffMs = config.launchDeferralBackoffMs;
     this.resolveRepoDefaultBranch = config.resolveRepoDefaultBranch ?? requireDefaultBranchRemote;
@@ -916,12 +922,18 @@ export class Orchestrator {
     }
   }
 
-  private mergeNodeExecutionAgentConfig(workflowTasks: readonly TaskState[]): { executionAgent?: string } {
+  private mergeNodeExecutionAgentConfig(workflowTasks: readonly TaskState[]): { executionAgent?: string; executionAgentSource?: ExecutionAgentSource } {
     const declared = workflowTasks
-      .map((task) => task.config.executionAgent?.trim())
-      .find((agent): agent is string => Boolean(agent));
-    const executionAgent = declared || this.defaultExecutionAgentProvider?.()?.trim();
-    return executionAgent ? { executionAgent } : {};
+      .map((task) => {
+        const agent = task.config.executionAgent?.trim();
+        return agent ? { agent, source: task.config.executionAgentSource } : undefined;
+      })
+      .find((entry): entry is { agent: string; source: ExecutionAgentSource | undefined } => Boolean(entry));
+    if (declared) {
+      return { executionAgent: declared.agent, executionAgentSource: declared.source ?? 'explicit' };
+    }
+    const executionAgent = this.defaultExecutionAgentProvider?.()?.trim();
+    return executionAgent ? { executionAgent, executionAgentSource: 'default' } : {};
   }
 
   /**
@@ -1565,6 +1577,7 @@ export class Orchestrator {
         requiresManualApproval: taskDef.requiresManualApproval,
         featureBranch: taskDef.featureBranch,
         executionAgent: taskDef.executionAgent,
+        executionAgentSource: taskDef.executionAgent ? taskDef.executionAgentSource ?? 'explicit' : undefined,
         executionModel: taskDef.executionModel,
         maxTurns: taskDef.maxTurns,
         priority: taskDef.priority ?? DEFAULT_TASK_PRIORITY,
@@ -1591,6 +1604,7 @@ export class Orchestrator {
           this.defaultPoolId,
           this.executorRoutingRules,
           this.availablePoolIds,
+          this.forcePoolId,
         );
         taskConfig = { ...baseConfig, poolId: resolvedRouting.poolId };
         resolvedRoutingByTaskId.set(scopedId, resolvedRouting.reason);
@@ -3049,6 +3063,9 @@ export class Orchestrator {
         command: rt.command,
         prompt: rt.prompt,
         executionAgent: rt.executionAgent ?? task.config.executionAgent,
+        executionAgentSource: rt.executionAgent !== undefined
+          ? rt.executionAgentSource ?? 'explicit'
+          : task.config.executionAgentSource,
         executionModel: rt.executionModel ?? task.config.executionModel,
         maxTurns: rt.maxTurns ?? task.config.maxTurns,
       } as const;

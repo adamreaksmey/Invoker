@@ -1011,8 +1011,11 @@ tasks:
 `;
     const plan = parsePlan(yaml);
     expect(plan.tasks[0].executionAgent).toBe('codex');
+    expect(plan.tasks[0].executionAgentSource).toBe('explicit');
     expect(plan.tasks[1].executionAgent).toBe('claude');
+    expect(plan.tasks[1].executionAgentSource).toBe('explicit');
     expect(plan.tasks[2].executionAgent).toBeUndefined();
+    expect(plan.tasks[2].executionAgentSource).toBeUndefined();
   });
 
   it('trims whitespace from executionAgent and treats empty as undefined', () => {
@@ -1031,7 +1034,9 @@ tasks:
 `;
     const plan = parsePlan(yaml);
     expect(plan.tasks[0].executionAgent).toBe('codex');
+    expect(plan.tasks[0].executionAgentSource).toBe('explicit');
     expect(plan.tasks[1].executionAgent).toBeUndefined();
+    expect(plan.tasks[1].executionAgentSource).toBeUndefined();
   });
 
   it('applies defaultExecutionAgent from config when agent task omits executionAgent', () => {
@@ -1053,8 +1058,82 @@ tasks:
 `;
     const plan = applyConfiguredPlanDefaults(parsePlan(yaml));
     expect(plan.tasks[0].executionAgent).toBe('codex');
+    expect(plan.tasks[0].executionAgentSource).toBe('default');
     expect(plan.tasks[1].executionAgent).toBeUndefined();
+    expect(plan.tasks[1].executionAgentSource).toBeUndefined();
     expect(plan.tasks[2].executionAgent).toBe('claude');
+    expect(plan.tasks[2].executionAgentSource).toBe('explicit');
+  });
+
+  it('applies forceExecution.executionAgent to command and prompt tasks, over a pinned agent', () => {
+    writeFileSync(isolatedConfigPath, JSON.stringify({
+      defaultBranch: 'main',
+      defaultExecutionAgent: 'codex',
+      forceExecution: { executionAgent: 'claude' },
+    }));
+    const yaml = `
+name: Force Agent Test
+repoUrl: git@github.com:test/repo.git
+tasks:
+  - id: command-task
+    description: "Command-only task"
+    command: "echo hi"
+  - id: prompt-task
+    description: "Prompt task"
+    prompt: "Do the thing"
+  - id: pinned-task
+    description: "Pinned agent"
+    prompt: "Do the thing"
+    executionAgent: codex
+`;
+    const plan = applyConfiguredPlanDefaults(parsePlan(yaml));
+    expect(plan.tasks.map((task) => task.executionAgent)).toEqual(['claude', 'claude', 'claude']);
+  });
+
+  it('trims forceExecution.executionAgent before applying it to executable tasks', () => {
+    writeFileSync(isolatedConfigPath, JSON.stringify({
+      defaultBranch: 'main',
+      defaultExecutionAgent: 'codex',
+      forceExecution: { executionAgent: '  claude  ' },
+    }));
+    const yaml = `
+name: Force Agent Trim Test
+repoUrl: git@github.com:test/repo.git
+tasks:
+  - id: command-task
+    description: "Command-only task"
+    command: "echo hi"
+  - id: prompt-task
+    description: "Prompt task"
+    prompt: "Do the thing"
+`;
+    const plan = applyConfiguredPlanDefaults(parsePlan(yaml));
+    expect(plan.tasks.map((task) => task.executionAgent)).toEqual(['claude', 'claude']);
+  });
+
+  it('keeps a pinned executionAgent when forceExecution.executionAgent is absent', () => {
+    writeFileSync(isolatedConfigPath, JSON.stringify({
+      defaultBranch: 'main',
+      defaultExecutionAgent: 'codex',
+      forceExecution: { poolId: 'forced_pool' },
+    }));
+    const yaml = `
+name: No Force Agent Test
+repoUrl: git@github.com:test/repo.git
+tasks:
+  - id: command-task
+    description: "Command-only task"
+    command: "echo hi"
+  - id: prompt-task
+    description: "Prompt task"
+    prompt: "Do the thing"
+  - id: pinned-task
+    description: "Pinned agent"
+    prompt: "Do the thing"
+    executionAgent: claude
+`;
+    const plan = applyConfiguredPlanDefaults(parsePlan(yaml));
+    expect(plan.tasks.map((task) => task.executionAgent)).toEqual([undefined, 'codex', 'claude']);
   });
 
   it('parses executionModel from task definitions', () => {
