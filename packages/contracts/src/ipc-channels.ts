@@ -447,6 +447,14 @@ export type InAppPlanResponse =
     };
 
 export type PlanningConfirmationMode = 'require' | 'auto_submit';
+/** How a planning model id relates to live Cursor discovery. */
+export type PlanningModelAvailability =
+  | 'confirmed'
+  | 'unverified'
+  | 'unavailable';
+
+export type PlanningPresetSection = 'recommended' | 'more';
+
 export interface PlanningPresetOption {
   key: string;
   label: string;
@@ -454,6 +462,23 @@ export interface PlanningPresetOption {
   model?: string;
   isDefault: boolean;
   defaultConfirmationMode?: PlanningConfirmationMode;
+  /** Live discovery status for Cursor model presets. Absent for non-Cursor tools. */
+  availability?: PlanningModelAvailability;
+  /** Picker grouping; curated Cursor models are recommended, extras are more. */
+  section?: PlanningPresetSection;
+}
+
+export type CursorModelDiscoveryStatus = 'ok' | 'failed' | 'empty' | 'skipped';
+
+export interface CursorModelDiscoverySummary {
+  status: CursorModelDiscoveryStatus;
+  /** Concise operator-facing warning when discovery did not confirm models. */
+  warning?: string;
+}
+
+export interface PlanningPresetsResponse {
+  options: PlanningPresetOption[];
+  cursorDiscovery?: CursorModelDiscoverySummary;
 }
 
 export interface InAppPlanningPlanSummaryTaskGroup {
@@ -979,6 +1004,15 @@ export type InAppPlanningDeleteSubmittedResponse =
   | { ok: true; deletedSessionIds: string[] }
   | { ok: false; error: string };
 
+export interface InAppPlanningCancelRequest {
+  sessionId?: string;
+  turnId?: string;
+}
+
+export type InAppPlanningCancelResponse =
+  | { ok: true; cancelled: boolean; sessionId?: string; turnId?: string }
+  | { ok: false; error: string; sessionId?: string };
+
 // ── Invoke Channel Registry ─────────────────────────────────
 // Each key is the channel name string; value is { request, response }.
 // `request` is a tuple of the arguments passed after the channel name.
@@ -1000,6 +1034,10 @@ export const IpcChannels = {
   'invoker:planning-chat-send': {} as {
     request: [request: InAppPlanningChatRequest];
     response: InAppPlanningChatResponse;
+  },
+  'invoker:planning-chat-cancel': {} as {
+    request: [request: InAppPlanningCancelRequest];
+    response: InAppPlanningCancelResponse;
   },
   'invoker:planning-chat-submit': {} as {
     request: [request: InAppPlanningSubmitRequest];
@@ -1054,8 +1092,8 @@ export const IpcChannels = {
     response: { ok: boolean; reason?: string };
   },
   'invoker:get-planning-presets': {} as {
-    request: [];
-    response: PlanningPresetOption[];
+    request: [options?: { refreshCursorModels?: boolean }];
+    response: PlanningPresetsResponse;
   },
   'invoker:load-plan': {} as {
     request: [planText: string];
