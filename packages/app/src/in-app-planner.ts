@@ -807,6 +807,9 @@ function planConversationConfig(
     onRawPlannerOutput: deps.onRawPlannerOutput
       ? (chunk) => deps.onRawPlannerOutput?.({ sessionId: threadTs, chunk })
       : undefined,
+    onPlannerReplyPreview: deps.onRawPlannerOutput
+      ? (preview) => deps.onRawPlannerOutput?.({ sessionId: threadTs, preview })
+      : undefined,
     log: deps.logger
       ? (_source, level, message) => {
         if (level === 'error') deps.logger?.error(message, { module: 'planning-chat' });

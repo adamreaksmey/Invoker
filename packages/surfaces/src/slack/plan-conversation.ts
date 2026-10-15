@@ -82,6 +82,15 @@ export type PlanningCommandBuilder = (opts: {
   prompt: string;
 }) => { command: string; args: string[] };
 export type RawPlannerOutputHandler = (chunk: string) => void;
+export type PlannerReplyPreviewHandler = (preview: string) => void;
+
+export function buildPlannerReplyPreview(stdoutSoFar: string): string {
+  const lastNewline = stdoutSoFar.lastIndexOf('\n');
+  if (lastNewline === -1) return '';
+  const completeLines = stdoutSoFar.slice(0, lastNewline);
+  const message = formatCodexPlannerStdout(completeLines).message;
+  return message ? redactEmbeddedPlanFence(message) : '';
+}
 
 export function defaultPlanningCommand(
   cursorCommand: string,
@@ -187,6 +196,7 @@ export interface PlanConversationConfig {
   preferStackedWorkflows?: boolean;
   /** Optional callback for raw stdout chunks emitted by the planner subprocess. */
   onRawPlannerOutput?: RawPlannerOutputHandler;
+  onPlannerReplyPreview?: PlannerReplyPreviewHandler;
   /** When set, turns call `driver.start`/`driver.append` instead of spawning a fresh CLI with the full history baked into the prompt. */
   harnessSessionDriver?: HarnessSessionDriver;
   /** Restores an existing harness session id (e.g. after a Slack restart) instead of starting fresh. */
@@ -470,9 +480,9 @@ The user has explicitly approved drafting. Produce the full Invoker YAML task pl
 Drafting is not authorized yet. Do NOT output a \`\`\`yaml code block, do NOT write a draft plan file, and do NOT tell the user the plan can be executed.
 
 Before drafting is authorized:
-1. Ask scoping questions first when the request is broad, ambiguous, risky, or missing constraints.
-2. Discuss relevant edge cases, corner cases, architecture choices, ambiguity, and likely historic reasons for the current code shape.
-3. Explore the codebase as needed, then use what you learned by referencing specific files, components, and patterns.
+1. Reply quickly. Answer from the conversation first. Read repository files only when the answer depends on code you have not seen yet, read only the files that answer it, and reference those specific files when you use them. Do not survey the repository up front.
+2. Ask scoping questions first when the request is broad, ambiguous, risky, or missing constraints.
+3. Discuss relevant edge cases, corner cases, architecture choices, ambiguity, and tradeoffs that would change the plan.
 4. When enough information exists, explain like the user is five: summarize assumptions, goals, and a high-level task outline in plain language.
 5. End by asking whether the user wants you to draft the YAML plan.`;
 
@@ -586,6 +596,7 @@ export class PlanConversation {
   private draftingPreauthorized: boolean;
   private log: LogFn;
   private onRawPlannerOutput?: RawPlannerOutputHandler;
+  private onPlannerReplyPreview?: PlannerReplyPreviewHandler;
   private plannerRetryLimit: number;
   private plannerRetryBaseDelayMs: number;
   private draftDoctor?: PlanningDraftDoctor;
@@ -641,6 +652,7 @@ export class PlanConversation {
     }
     this.draftingPreauthorized = config.draftingPreauthorized ?? false;
     this.onRawPlannerOutput = config.onRawPlannerOutput;
+    this.onPlannerReplyPreview = config.onPlannerReplyPreview;
     this.plannerRetryLimit = Math.max(0, config.plannerRetryLimit ?? DEFAULT_PLANNER_RETRY_LIMIT);
     this.plannerRetryBaseDelayMs = Math.max(0, config.plannerRetryBaseDelayMs ?? DEFAULT_PLANNER_RETRY_BASE_DELAY_MS);
     this.draftDoctor = config.draftDoctor
@@ -1321,6 +1333,18 @@ export class PlanConversation {
     throwIfPlannerAuthPreflightUnauthenticated(preflight, plannerLabel);
   }
 
+  private emitReplyPreviewIfChanged(stdoutSoFar: string, previousPreview: string): string {
+    if (!this.onPlannerReplyPreview) return previousPreview;
+    const preview = buildPlannerReplyPreview(stdoutSoFar);
+    if (!preview || preview === previousPreview) return previousPreview;
+    try {
+      this.onPlannerReplyPreview(preview);
+    } catch (err) {
+      this.log('plan-conversation', 'error', `Planner reply preview handler failed: ${err}`);
+    }
+    return preview;
+  }
+
   private clearActivePlannerChild(child: ChildProcess): void {
     if (this.activePlannerChild === child) {
       this.activePlannerChild = null;
@@ -1387,6 +1411,7 @@ export class PlanConversation {
       let stderr = '';
       let stdoutChunks = 0;
       let stderrChunks = 0;
+      let lastReplyPreview = '';
 
       this.log('plan-conversation', 'info', `[PERF] cursor_spawn: pid=${child.pid ?? 'none'}, tool=${plannerLabel}, model=${this.model ?? 'default'}, cmd="${command} ${args.slice(0, -1).join(' ')} <prompt>", promptLen=${prompt.length}, cwd=${this.workingDir ?? process.cwd()}, attempt=${attemptNumber}/${totalAttempts}`);
 
@@ -1401,6 +1426,7 @@ export class PlanConversation {
             this.log('plan-conversation', 'error', `Raw planner output handler failed: ${err}`);
           }
         }
+        lastReplyPreview = this.emitReplyPreviewIfChanged(stdout, lastReplyPreview);
         this.log('plan-conversation', 'info', `[PERF] cursor_stdout chunk #${stdoutChunks}: +${chunkStr.length} bytes (total=${stdout.length}, elapsed=${Date.now() - spawnStart}ms)`);
         armAuthLimboWatch(`${stdout}\n${stderr}`);
       });

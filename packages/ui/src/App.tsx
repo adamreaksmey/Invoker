@@ -1093,7 +1093,9 @@ export function App() {
         applyTurnOutcomeRef.current(sessionId, event.turnId, event.turn);
         return;
       }
-      if (!sessionId || typeof event.chunk !== 'string' || !event.chunk) return;
+      const chunk = typeof event.chunk === 'string' ? event.chunk : '';
+      const preview = typeof event.preview === 'string' && event.preview ? event.preview : undefined;
+      if (!sessionId || (!chunk && !preview)) return;
 
       const sessions = planningSessionsRef.current;
       const isStreamingTarget = (session: PlanningSessionView): boolean => (
@@ -1125,8 +1127,9 @@ export function App() {
         return {
           ...prev,
           [targetSessionId]: {
-            text: `${current?.text ?? ''}${event.chunk}`,
+            text: `${current?.text ?? ''}${chunk}`,
             status: 'streaming',
+            reply: preview ?? current?.reply,
           },
         };
       });

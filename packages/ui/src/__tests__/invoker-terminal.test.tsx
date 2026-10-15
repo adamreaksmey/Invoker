@@ -1006,6 +1006,49 @@ describe('Invoker terminal (component)', () => {
     });
   });
 
+  it('shows the parsed live reply while busy without rendering raw stream chunks', async () => {
+    let resolveSend: ((value: any) => void) | null = null;
+    mock.api.planningChatSend = vi.fn(() => new Promise((resolve) => {
+      resolveSend = resolve;
+    }) as any) as any;
+
+    render(<App />);
+    await openPlanningTerminal();
+
+    submitPlanningText('why is this slow?');
+    await waitFor(() => expect(mock.api.planningChatSend).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      mock.firePlanningChatStream({ sessionId: 'session-1', chunk: '{"type":"item.completed","item":{"type":"command_execution"}}\n' });
+      mock.firePlanningChatStream({ sessionId: 'session-1', preview: 'Checking the planner path.' });
+    });
+
+    const liveReply = await screen.findByTestId('invoker-terminal-streaming-reply');
+    expect(liveReply).toHaveTextContent('Checking the planner path.');
+    expect(screen.getByTestId('invoker-terminal-planner-stream')).toHaveTextContent('Drafting your plan…');
+    expect(screen.getByTestId('invoker-terminal-transcript')).not.toHaveTextContent('command_execution');
+
+    await act(async () => {
+      mock.firePlanningChatStream({ sessionId: 'session-1', preview: 'Checking the planner path.\n\nIt waits for the agent.' });
+    });
+    expect(screen.getByTestId('invoker-terminal-streaming-reply')).toHaveTextContent('It waits for the agent.');
+
+    await act(async () => {
+      resolveSend?.({
+        ok: true,
+        sessionId: 'session-1',
+        reply: 'Final assistant reply.',
+        draftPlanAvailable: false,
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('invoker-terminal-streaming-reply')).not.toBeInTheDocument();
+      expect(screen.getByTestId('invoker-terminal-transcript')).toHaveTextContent('Final assistant reply.');
+      expect(screen.getByTestId('invoker-terminal-transcript')).not.toHaveTextContent('It waits for the agent.');
+    });
+  });
+
   it('keeps concise failed planning activity visible until the next send starts', async () => {
     const plannerError = 'planner exited with code 1';
     let resolveFirstSend: ((value: any) => void) | null = null;

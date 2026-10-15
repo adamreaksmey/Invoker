@@ -61,6 +61,7 @@ export function planningSessionFromSummary(
 export type PlanningStreamState = {
   text: string;
   status: 'streaming' | 'failed';
+  reply?: string;
 };
 
 export function makeInitialPlanningSession(

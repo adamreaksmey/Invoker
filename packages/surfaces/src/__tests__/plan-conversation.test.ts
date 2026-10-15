@@ -4,6 +4,7 @@ import {
   PLANNER_AUTH_REQUIRED_MESSAGE,
   PlanningTurnCancelledError,
   buildPlanSystemPrompt,
+  buildPlannerReplyPreview,
   buildPlannerAuthRequiredError,
   extractYamlPlan,
   globToRegex,
@@ -760,6 +761,37 @@ describe('PlanConversation', () => {
     await expect(promise).resolves.toBe('chunk1chunk2');
   });
 
+  it('emits a parsed reply preview before the planner closes and skips unchanged previews', async () => {
+    const previews: string[] = [];
+    const conv = new PlanConversation({
+      authPreflightEnabled: false,
+      onPlannerReplyPreview: (preview) => previews.push(preview),
+    });
+    const proc = new EventEmitter() as any;
+    proc.stdout = new EventEmitter();
+    proc.stderr = new EventEmitter();
+    proc.kill = vi.fn();
+    mockSpawn.mockReturnValueOnce(proc);
+
+    const promise = conv.sendMessage('Hello');
+    await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
+
+    proc.stdout.emit('data', Buffer.from('Looking at the '));
+    expect(previews).toEqual([]);
+
+    proc.stdout.emit('data', Buffer.from('request.\n'));
+    expect(previews).toEqual(['Looking at the request.']);
+
+    proc.stdout.emit('data', Buffer.from('\n'));
+    expect(previews).toEqual(['Looking at the request.']);
+
+    proc.stdout.emit('data', Buffer.from('Which repo?\n'));
+    expect(previews).toEqual(['Looking at the request.', 'Looking at the request.\n\nWhich repo?']);
+
+    proc.emit('close', 0);
+    await expect(promise).resolves.toBe('Looking at the request.\n\nWhich repo?');
+  });
+
   it('keeps the final reply and assistant history as the assembled stdout', async () => {
     const chunks: string[] = [];
     const conv = new PlanConversation({ onRawPlannerOutput: (chunk) => chunks.push(chunk) });
@@ -1200,6 +1232,18 @@ describe('PlanConversation prompt construction', () => {
     expect(prompt).toContain('Drafting is not authorized yet.');
     expect(prompt).toContain('Ask scoping questions first');
     expect(prompt).not.toContain('name: "Plan Name"');
+  });
+
+  it('buildPlanSystemPrompt conversational scoping turns read files on demand instead of exploring up front', () => {
+    const prompt = buildPlanSystemPrompt('main', undefined, {
+      conversationalPlanning: true,
+      draftingAuthorized: false,
+      planningSurface: 'in_app',
+    });
+    expect(prompt).toContain('Answer from the conversation first.');
+    expect(prompt).toContain('Read repository files only when the answer depends on code you have not seen yet');
+    expect(prompt).toContain('Do not survey the repository up front.');
+    expect(prompt).not.toContain('Explore the codebase as needed');
   });
 
   it('buildPlanSystemPrompt conversational mode with drafting authorized points at the plan-to-invoker skill instead of embedding the ad hoc contract', () => {
@@ -1783,5 +1827,46 @@ describe('PlanConversation instrumentation', () => {
     const promptLines = logMessages().filter(m => m.startsWith('[CONV] Turn') && m.includes('promptLen='));
     expect(promptLines[0]).toContain('historyMsgs=0');
     expect(promptLines[1]).toContain('historyMsgs=2');
+  });
+});
+
+describe('buildPlannerReplyPreview', () => {
+  const codexLine = (event: Record<string, unknown>): string => `${JSON.stringify(event)}\n`;
+
+  it('returns nothing until a complete line exists', () => {
+    expect(buildPlannerReplyPreview('')).toBe('');
+    expect(buildPlannerReplyPreview('{"type":"thread.st')).toBe('');
+  });
+
+  it('returns plain-text planner output from complete lines only', () => {
+    expect(buildPlannerReplyPreview('First line.\nSecond li')).toBe('First line.');
+  });
+
+  it('returns only the latest Codex agent message and hides JSONL events and tool items', () => {
+    const stdout = [
+      codexLine({ type: 'thread.started', thread_id: 'thread-1' }),
+      codexLine({ type: 'item.completed', item: { type: 'reasoning', text: 'thinking about it' } }),
+      codexLine({ type: 'item.completed', item: { type: 'command_execution', command: 'ls', aggregated_output: 'secret-tool-output' } }),
+      codexLine({ type: 'item.completed', item: { type: 'agent_message', text: 'Checking the planner.' } }),
+      codexLine({ type: 'item.completed', item: { type: 'agent_message', text: 'Which harness do you use?' } }),
+      '{"type":"item.comp',
+    ].join('');
+
+    const preview = buildPlannerReplyPreview(stdout);
+
+    expect(preview).toBe('Which harness do you use?');
+    expect(preview).not.toContain('secret-tool-output');
+    expect(preview).not.toContain('thread.started');
+  });
+
+  it('returns nothing for Codex JSONL that has no agent message yet', () => {
+    const stdout = codexLine({ type: 'thread.started', thread_id: 'thread-1' });
+    expect(buildPlannerReplyPreview(stdout)).toBe('');
+  });
+
+  it('redacts an embedded YAML draft, including one that is still being written', () => {
+    const preview = buildPlannerReplyPreview('Here is the draft:\n```yaml\nname: "Partial"\ntasks:\n');
+    expect(preview).toContain('Here is the draft:');
+    expect(preview).not.toContain('name: "Partial"');
   });
 });
