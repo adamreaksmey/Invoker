@@ -1,6 +1,11 @@
 import { readFileSync } from 'node:fs';
 import * as path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  acknowledgeNoTrackHeadlessExec,
+  createGuiMutationTaskActions,
+  type GuiMutationTaskActionsContext,
+} from '../ipc/gui-mutation-handlers.js';
 
 const mainSource = readFileSync(path.resolve(__dirname, '..', 'main.ts'), 'utf8');
 const guiMutationHandlersSource = readFileSync(
@@ -109,11 +114,12 @@ describe('GUI mutation translation', () => {
   });
 
 
-  it('classifies delegated standalone workflow delete and detach as workflow-scoped', () => {
+  it('classifies delegated standalone workflow delete, detach, and attach as workflow-scoped', () => {
     const classifierSource = getStandaloneClassifierSource();
     expect(classifierSource).toContain("case 'delete':");
     expect(classifierSource).toContain("case 'delete-workflow':");
     expect(classifierSource).toContain("case 'detach-workflow':");
+    expect(classifierSource).toContain("case 'attach-workflow':");
     expect(classifierSource).toContain('workflowId: arg0');
     expect(classifierSource).toContain("priority: 'high'");
   });
@@ -182,6 +188,58 @@ describe('GUI mutation translation', () => {
     expect(missing).toEqual([]);
   });
 });
+
+describe('attach-workflow queue classification', () => {
+  it('queues a no-track attach against the downstream workflow', () => {
+    const actions = createGuiMutationTaskActions(classificationContext());
+    const translated = actions.translateGuiMutationToHeadless({
+      channel: 'invoker:attach-workflow',
+      args: ['wf-downstream', 'wf-upstream'],
+    } as never) as { channel: string; request: { args: string[]; noTrack: true } };
+    const submit = vi.fn(() => 1);
+
+    expect(translated.channel).toBe('headless.exec');
+    const classified = actions.classifyHeadlessExecMutation(translated.request);
+    expect(classified).toEqual({ workflowId: 'wf-downstream', priority: 'high' });
+
+    const queued = acknowledgeNoTrackHeadlessExec(
+      translated.request,
+      classified.workflowId,
+      classified.priority,
+      'standalone',
+      {
+        ownerId: 'owner-1',
+        getWorkflowMutationCoordinator: () => ({ submit }) as never,
+        workflowExists: () => true,
+        logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() } as never,
+      },
+    );
+
+    expect(queued?.intentId).toBe(1);
+    expect(submit).toHaveBeenCalledWith(
+      'wf-downstream',
+      'high',
+      'headless.exec',
+      [translated.request],
+      expect.objectContaining({ deferDrain: true }),
+    );
+  });
+});
+
+function classificationContext(): GuiMutationTaskActionsContext {
+  const logger = { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn(), child: vi.fn() };
+  (logger.child as ReturnType<typeof vi.fn>).mockReturnValue(logger);
+  return {
+    logger,
+    persistence: { loadWorkflow: vi.fn(), listWorkflows: vi.fn(() => []), loadTasks: vi.fn(() => []) },
+    getOrchestrator: () => ({}) as never,
+    getCommandService: () => ({}) as never,
+    getWorkflowMutationCoordinator: () => null,
+    getActiveMutationContext: () => undefined,
+    getRendererTaskFeed: () => ({}) as never,
+    workflowMutationDispatcher: new Map(),
+  } as unknown as GuiMutationTaskActionsContext;
+}
 
 function extractBalancedBlock(source: string, marker: string): string {
   const markerIdx = source.indexOf(marker);
