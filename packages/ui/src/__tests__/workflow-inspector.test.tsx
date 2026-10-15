@@ -360,6 +360,41 @@ describe('WorkflowInspector', () => {
     expect(screen.getByText('No pull requests yet')).toBeInTheDocument();
   });
 
+  it('explains an empty pull request stack when the gate skipped publication', () => {
+    const reason = 'No pull request opened. plan/font has no file changes against main.';
+    render(
+      <WorkflowInspector
+        workflow={{ ...workflow, status: 'completed', onFinish: 'pull_request' }}
+        task={makeTask({
+          id: '__merge__wf-1',
+          description: 'Pull request gate',
+          status: 'completed',
+          config: { workflowId: 'wf-1', isMergeNode: true },
+          execution: { reviewStatus: reason },
+        })}
+        reviewGate={{
+          workflowId: 'wf-1',
+          mergeTaskId: '__merge__wf-1',
+          status: 'completed',
+          activeGeneration: 0,
+          completion: { required: 'all', status: 'approved' },
+          ready: false,
+          substate: null,
+          artifacts: [],
+          discardedArtifacts: [],
+          edges: [],
+        }}
+        collapsed={false}
+        advancedExpanded={false}
+        onToggleCollapsed={() => {}}
+        onToggleAdvanced={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId('empty-review-publication-alert')).toHaveTextContent(reason);
+    expect(screen.queryByText('No pull requests yet')).not.toBeInTheDocument();
+  });
+
   it('renders a flat pull request stack in artifact order', () => {
     render(
       <WorkflowInspector

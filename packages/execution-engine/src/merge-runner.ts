@@ -363,6 +363,10 @@ async function syncGateWorkspaceToFeatureBranch(
   await execGitInMergeSafe(host, ['checkout', featureBranch], gateWorkspacePath);
 }
 
+export function emptyReviewPublicationStatus(baseBranch: string, featureBranch: string): string {
+  return `No pull request opened. ${featureBranch} has no file changes against ${baseBranch}.`;
+}
+
 async function listReviewableChangedFiles(
   host: MergeRunnerHost,
   dir: string,
@@ -1042,7 +1046,7 @@ export async function runMergeGateActionImpl(
                 workspacePath: gateWorkspacePath,
                 reviewUrl: undefined,
                 reviewId: undefined,
-                reviewStatus: undefined,
+                reviewStatus: emptyReviewPublicationStatus(reviewBase.branchName, featureBranch),
                 reviewGate: undefined,
               },
             },
@@ -1644,6 +1648,9 @@ export async function publishAfterFixImpl(
         fixedIntegrationSha: undefined,
         fixedIntegrationRecordedAt: undefined,
         fixedIntegrationSource: undefined,
+        ...(skipReviewForEmptyDiff
+          ? { reviewStatus: emptyReviewPublicationStatus(reviewBase.branchName, featureBranch) }
+          : {}),
       },
     }, {
       selectedAttemptId: task.execution.selectedAttemptId,

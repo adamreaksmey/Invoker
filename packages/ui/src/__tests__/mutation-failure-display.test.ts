@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isOperatorDecisionFailure,
   mutationFailureBannerMessage,
   mutationFailureTitle,
   shouldShowMutationFailureBanner,
@@ -24,6 +25,39 @@ describe('shouldShowMutationFailureBanner', () => {
       workflowId: 'wf-1',
       channel: 'invoker:recreate',
       message: 'recreate failed',
+      failedAt: '2026-07-09T00:00:00.000Z',
+    })).toBe(false);
+  });
+});
+
+describe('isOperatorDecisionFailure', () => {
+  it('is true for approve and reject, including headless commands', () => {
+    expect(isOperatorDecisionFailure({
+      intentId: 1,
+      workflowId: 'wf-1',
+      channel: 'headless.exec',
+      headlessCommand: 'approve',
+      taskId: '__merge__wf-1',
+      message: '1 is open',
+      failedAt: '2026-07-09T00:00:00.000Z',
+    })).toBe(true);
+    expect(isOperatorDecisionFailure({
+      intentId: 1,
+      workflowId: 'wf-1',
+      channel: 'invoker:reject',
+      message: 'rejected',
+      failedAt: '2026-07-09T00:00:00.000Z',
+    })).toBe(true);
+  });
+
+  it('is false for other task mutations', () => {
+    expect(isOperatorDecisionFailure({
+      intentId: 1,
+      workflowId: 'wf-1',
+      channel: 'headless.exec',
+      headlessCommand: 'fix',
+      taskId: 'wf-1/task-alpha',
+      message: 'SSH remote script failed',
       failedAt: '2026-07-09T00:00:00.000Z',
     })).toBe(false);
   });

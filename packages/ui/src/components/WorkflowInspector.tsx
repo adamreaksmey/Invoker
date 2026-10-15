@@ -241,14 +241,35 @@ function artifactDetail(artifact: ReviewGateArtifact): string | null {
 }
 
 
-function ReviewGateStackSection({ reviewGate }: { reviewGate: ReviewGateQueryResponse }): JSX.Element {
+function unpublishedReviewReason(task: TaskState | null | undefined): string | undefined {
+  if (!task?.config.isMergeNode || task.execution.reviewUrl) return undefined;
+  const status = task.execution.reviewStatus?.trim();
+  return status || undefined;
+}
+
+function ReviewGateStackSection({
+  reviewGate,
+  emptyReason,
+}: {
+  reviewGate: ReviewGateQueryResponse;
+  emptyReason?: string;
+}): JSX.Element {
   const artifacts = reviewGate.artifacts;
   const hasConnectors = artifacts.length > 1;
   return (
     <section className="rounded border border-border bg-secondary/70 p-3">
       <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Pull Request Stack</div>
       {artifacts.length === 0 ? (
-        <div className="mt-2 text-xs text-muted-foreground">No pull requests yet</div>
+        emptyReason ? (
+          <div
+            data-testid="empty-review-publication-alert"
+            className="mt-2 rounded border border-amber-500/40 bg-amber-950/40 p-2 text-xs text-amber-100"
+          >
+            {emptyReason}
+          </div>
+        ) : (
+          <div className="mt-2 text-xs text-muted-foreground">No pull requests yet</div>
+        )
       ) : (
         <ol className="mt-2 space-y-2">
           {artifacts.map((artifact, index) => (
@@ -966,7 +987,14 @@ export function WorkflowInspector({
         )}
 
         {reviewGate ? (
-          <ReviewGateStackSection reviewGate={reviewGate} />
+          <ReviewGateStackSection reviewGate={reviewGate} emptyReason={unpublishedReviewReason(task)} />
+        ) : unpublishedReviewReason(task) ? (
+          <section className="rounded border border-amber-500/40 bg-amber-950/40 p-3">
+            <div className="text-[11px] uppercase tracking-wide text-amber-200">Pull request</div>
+            <p data-testid="empty-review-publication-alert" className="mt-2 text-xs text-amber-100">
+              {unpublishedReviewReason(task)}
+            </p>
+          </section>
         ) : reviewUrl && (
           <section className="rounded border border-border bg-secondary/70 p-3">
             <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Pull Request</div>

@@ -45,6 +45,11 @@ import { BulkPoolReassignmentModal, type BulkPoolReassignmentResult } from './co
 import { WorkerDetailsPanel } from './components/WorkerDetailsPanel.js';
 import { WorkerDetailControl } from './components/WorkerDetailControl.js';
 import { WorkerActivityCard } from './components/WorkerActivityCard.js';
+import {
+  isOperatorDecisionFailure,
+  mutationFailureBannerMessage,
+  mutationFailureTitle,
+} from './lib/mutation-failure-display.js';
 import { groupWorkflowCoreActivity } from './lib/workflow-core-activity.js';
 import { isWorkflowBuilt } from './lib/workflow-status.js';
 import { ActionGraphView } from './components/ActionGraphView.js';
@@ -1643,6 +1648,9 @@ export function App() {
         const task = tasksRef.current.get(failedTaskId);
         if (task) {
           selectTaskById(task.id);
+        }
+        if (isOperatorDecisionFailure(event)) {
+          notifyMutationError(mutationFailureTitle(event), mutationFailureBannerMessage(event));
         }
         return;
       }

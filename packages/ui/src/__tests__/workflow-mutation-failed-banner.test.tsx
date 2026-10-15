@@ -2,9 +2,10 @@
  * Integration test: workflow-mutation-failed handling in <App />.
  *
  * A mutation failure never changes the sidebar surface. Task-scoped failures
- * are recorded, select the failed task, and show persistent inspector detail;
- * failures with no task context are transient toast errors. No global top
- * banner is rendered.
+ * are recorded, select the failed task, and show persistent inspector detail.
+ * Approve and reject also raise a toast, because the confirmation dialog
+ * closes before the owner refusal arrives. Failures with no task context are
+ * transient toast errors. No global top banner is rendered.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -82,6 +83,10 @@ describe('Workflow mutation failed handling', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('workflow-mutation-failed-banner')).not.toBeInTheDocument();
     });
+    const toast = await screen.findByLabelText('Notifications alt+T');
+    expect(toast.querySelector('[data-sonner-toast]')).toHaveAttribute('data-type', 'error');
+    expect(toast).toHaveTextContent('Approve failed');
+    expect(toast).toHaveTextContent('missing execution harness "codex"');
   });
 
   it('leaves the sidebar surface alone when a task-scoped failure arrives', async () => {

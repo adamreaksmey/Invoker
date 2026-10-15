@@ -20,6 +20,8 @@ interface MergeGateNodeData {
   gateKind: MergeGateKind;
   mergeMode?: 'manual' | 'automatic' | 'external_review';
   baseBranch?: string;
+  reviewUrl?: string;
+  reviewStatus?: string;
   /** Set when merge gate was fixed with Claude — first approve clears this (orchestrator). */
   pendingFixError?: string;
   dimmed?: boolean;
@@ -44,6 +46,8 @@ export function MergeGateNode({ data }: MergeGateNodeProps) {
     gateKind,
     mergeMode = 'manual',
     baseBranch,
+    reviewUrl,
+    reviewStatus,
     pendingFixError,
     dimmed: dataDimmed,
     selected: dataSelected,
@@ -107,6 +111,11 @@ export function MergeGateNode({ data }: MergeGateNodeProps) {
         <span className={`h-1.5 w-1.5 rounded-full ${colors.dot} ${pendingPulse}`} />
         {statusLabel}
       </div>
+      {!reviewUrl && reviewStatus ? (
+        <div data-testid="merge-gate-publication-note" className="mt-1.5 line-clamp-3 text-[11px] leading-4 text-amber-200">
+          {reviewStatus}
+        </div>
+      ) : null}
       <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border !border-slate-900 !bg-slate-500/90" />
     </div>
   );

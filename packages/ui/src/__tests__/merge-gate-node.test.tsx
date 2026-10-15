@@ -77,6 +77,16 @@ describe('MergeGateNode', () => {
     expect(screen.queryByTestId('approve-merge-button')).not.toBeInTheDocument();
   });
 
+  it('shows why a completed pull request gate published nothing', () => {
+    renderNode({
+      status: 'completed',
+      label: 'Apply Times New Roman',
+      gateKind: 'pull_request',
+      reviewStatus: 'No pull request opened. plan/font has no file changes against main.',
+    });
+    expect(screen.getByTestId('merge-gate-publication-note')).toHaveTextContent('no file changes against main');
+  });
+
   it('does not render an inline approve button in external_review mode', () => {
     renderNode({
       status: 'awaiting_approval',
