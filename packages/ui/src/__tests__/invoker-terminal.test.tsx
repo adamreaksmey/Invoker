@@ -505,6 +505,8 @@ describe('Invoker terminal (component)', () => {
 
     const bubble = screen.getByTestId('invoker-terminal-user-bubble');
     expect(bubble.className).toContain('justify-end');
+    expect(bubble.querySelector('.w-fit')).toBeTruthy();
+    expect(bubble.querySelector('.rounded-br-\\[4px\\]')).toBeNull();
     expect(bubble).toHaveTextContent('Plan a feature');
     expect(screen.queryByText('You')).not.toBeInTheDocument();
   });

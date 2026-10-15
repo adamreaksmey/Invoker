@@ -314,7 +314,7 @@ function MessageTimestamp({ createdAt }: { createdAt?: string }): JSX.Element | 
     <time
       dateTime={createdAt}
       data-testid="invoker-terminal-message-time"
-      className="mt-1 px-1 text-[11px] leading-4 text-muted-foreground"
+      className="mt-1 text-[11px] leading-4 text-muted-foreground"
     >
       {label}
     </time>
@@ -323,26 +323,19 @@ function MessageTimestamp({ createdAt }: { createdAt?: string }): JSX.Element | 
 
 function UserMessageBubble({
   text,
-  isLastInGroup,
   createdAt,
 }: {
   text: string;
-  isLastInGroup: boolean;
   createdAt?: string;
 }): JSX.Element {
-  const radiusClass = isLastInGroup
-    ? 'rounded-[16px] rounded-br-[4px]'
-    : 'rounded-[16px]';
   return (
-    <div className="flex flex-col items-end">
-      <div className="flex justify-end" data-testid="invoker-terminal-user-bubble">
-        <div
-          className={`max-w-[70%] bg-planning-chat-user/15 px-[14px] py-[9px] text-left text-[15px] leading-[1.5] text-foreground ${radiusClass}`}
-        >
-          <div className="whitespace-pre-wrap font-sans">{text}</div>
+    <div className="flex justify-end" data-testid="invoker-terminal-user-bubble">
+      <div className="flex w-fit max-w-[70%] flex-col items-end">
+        <div className="whitespace-pre-wrap rounded-2xl bg-planning-chat-user/15 px-3.5 py-2 text-left text-[15px] leading-5 text-foreground">
+          {text}
         </div>
+        <MessageTimestamp createdAt={createdAt} />
       </div>
-      <MessageTimestamp createdAt={createdAt} />
     </div>
   );
 }
@@ -489,7 +482,6 @@ function renderCollapsedLine(
       <UserMessageBubble
         key={item.id}
         text={item.text}
-        isLastInGroup={isLastInGroup}
         createdAt={item.createdAt}
       />
     );

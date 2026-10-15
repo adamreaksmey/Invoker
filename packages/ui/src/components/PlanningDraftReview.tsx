@@ -17,7 +17,6 @@ export interface PlanningDraftReviewProps {
   onCreateWorkflow: () => void;
   onDiscardDraft: () => void;
   onCancelReview: () => void;
-  onOpenGraph: () => void;
 }
 
 function DraftTaskFields({ fields }: {
@@ -140,25 +139,17 @@ function DraftConfirmActions({
 
 function DraftReviewActions(props: Pick<
   PlanningDraftReviewProps,
-  'confirmationMode' | 'keptDraft' | 'onCreateWorkflow' | 'onDiscardDraft' | 'onCancelReview' | 'onOpenGraph'
->): JSX.Element {
+  'confirmationMode' | 'keptDraft' | 'onCreateWorkflow' | 'onDiscardDraft' | 'onCancelReview'
+>): JSX.Element | null {
+  if (props.confirmationMode !== 'require') return null;
   return (
     <div className="shrink-0 space-y-2 border-t border-border bg-card/80 p-4">
-      {props.confirmationMode === 'require' ? (
-        <DraftConfirmActions
-          keptDraft={props.keptDraft}
-          onCreateWorkflow={props.onCreateWorkflow}
-          onDiscardDraft={props.onDiscardDraft}
-          onCancelReview={props.onCancelReview}
-        />
-      ) : null}
-      <button
-        type="button"
-        onClick={props.onOpenGraph}
-        className="w-full rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-secondary"
-      >
-        Open graph
-      </button>
+      <DraftConfirmActions
+        keptDraft={props.keptDraft}
+        onCreateWorkflow={props.onCreateWorkflow}
+        onDiscardDraft={props.onDiscardDraft}
+        onCancelReview={props.onCancelReview}
+      />
     </div>
   );
 }
@@ -188,7 +179,6 @@ export function PlanningDraftReview({
   onCreateWorkflow,
   onDiscardDraft,
   onCancelReview,
-  onOpenGraph,
 }: PlanningDraftReviewProps): JSX.Element {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -209,7 +199,6 @@ export function PlanningDraftReview({
         onCreateWorkflow={onCreateWorkflow}
         onDiscardDraft={onDiscardDraft}
         onCancelReview={onCancelReview}
-        onOpenGraph={onOpenGraph}
       />
     </div>
   );
