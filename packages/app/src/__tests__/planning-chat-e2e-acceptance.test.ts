@@ -60,7 +60,7 @@ const PLAN_C_REPLY = `Here is the revised plan.
 \`\`\`yaml
 name: Plan C
 onFinish: none
-repoUrl: ${REPO_A}
+repoUrl: ${REPO_B}
 tasks:
   - id: only
     description: Only task
@@ -68,7 +68,7 @@ tasks:
 \`\`\``;
 const PLAN_C_TEXT = `name: Plan C
 onFinish: none
-repoUrl: ${REPO_A}
+repoUrl: ${REPO_B}
 tasks:
   - id: only
     description: Only task
@@ -102,7 +102,7 @@ function sidecarPathFor(sessionId: string): string {
   return join(resolveInvokerHomeRoot(), 'plan-drafts', `${sessionId}.yaml`);
 }
 
-describe('planning chat E2E acceptance: explore -> draft -> critique -> locked repo binding -> re-draft -> submit', () => {
+describe('planning chat E2E acceptance: explore -> draft -> critique -> explicit repo rebind -> re-draft -> submit', () => {
   let sessionId: string | undefined;
 
   afterEach(() => {
@@ -110,7 +110,7 @@ describe('planning chat E2E acceptance: explore -> draft -> critique -> locked r
     vi.restoreAllMocks();
   });
 
-  it('proves worktree binding, durable draft persistence, post-draft immutability, mid-conversation rebind refusal, and DB-identical submit all hold together across one continuous session', async () => {
+  it('proves worktree binding, durable draft persistence, post-draft immutability, explicit mid-conversation rebind, and DB-identical submit all hold together across one continuous session', async () => {
     const worktreeRoot = mkdtempSync(join(tmpdir(), 'planning-chat-e2e-'));
     const repoPool = createFakeRepoPool({
       [REPO_A]: { worktreePath: join(worktreeRoot, 'repo-a'), headSha: 'sha-repo-a' },
@@ -214,31 +214,29 @@ describe('planning chat E2E acceptance: explore -> draft -> critique -> locked r
       expect(sessions.get(sessionId)?.status).toBe('draft_ready');
       expect(adapter.loadInAppPlanningSession(sessionId)?.draftPlanText).toBe(planAText);
 
-      const messageCountBeforeRebind = sessions.get(sessionId)?.messages.length;
-      const rebindRefusal = await rebindPlanningChatRepo({
+      const rebind = await rebindPlanningChatRepo({
         sessionId,
         repoUrl: REPO_B,
         baseBranch: 'main',
       }, {
-        config: {},
+        config: { defaultRepoUrl: REPO_A, defaultBranch: 'main' },
+        loadGeneratedPlan,
         sessions,
+        planningCommandBuilder,
+        isInstalled: () => true,
         repoPool,
         planningSessionStore: adapter,
       });
-      expect(rebindRefusal).toEqual({
-        ok: false,
-        error: 'Set the repo before the conversation or terminal starts.',
+      expect(rebind).toEqual({ ok: true, action: 'invalidate_and_block_submit', baseBranch: 'main' });
+      const sessionAfterRebind = sessions.get(sessionId);
+      expect(sessionAfterRebind).toMatchObject({
+        draftPlanText: undefined,
+        status: 'still_discussing',
+        repoUrl: REPO_B,
+        baseCommit: 'sha-repo-b',
       });
-      const sessionAfterRefusedRebind = sessions.get(sessionId);
-      expect(sessionAfterRefusedRebind).toMatchObject({
-        draftPlanText: planAText,
-        status: 'draft_ready',
-        repoUrl: REPO_A,
-        baseCommit: 'sha-repo-a',
-      });
-      expect(sessionAfterRefusedRebind?.messages.length).toBe(messageCountBeforeRebind);
-      expect(adapter.loadInAppPlanningSession(sessionId)?.draftPlanText).toBe(planAText);
-      expect(readFileSync(sidecarPathFor(sessionId), 'utf8')).toBe(planAText);
+      expect(sessionAfterRebind?.messages.some((message) => message.text.includes('previous draft was cleared'))).toBe(true);
+      expect(adapter.loadInAppPlanningSession(sessionId)?.draftPlanText).toBeUndefined();
 
       spawnPlanner.mockResolvedValueOnce(PLAN_C_REPLY);
       const redraftTurn = await sendPlanningChatMessage({
@@ -270,8 +268,8 @@ describe('planning chat E2E acceptance: explore -> draft -> critique -> locked r
       });
       if (!submitResult.ok) throw new Error(submitResult.error);
 
-      expect(loadGeneratedPlan).toHaveBeenCalledWith(dbDraftBeforeSubmit, { repoUrl: REPO_A, baseBranch: 'main' });
-      expect(loadGeneratedPlan).toHaveBeenCalledWith(planCText, { repoUrl: REPO_A, baseBranch: 'main' });
+      expect(loadGeneratedPlan).toHaveBeenCalledWith(dbDraftBeforeSubmit, { repoUrl: REPO_B, baseBranch: 'main' });
+      expect(loadGeneratedPlan).toHaveBeenCalledWith(planCText, { repoUrl: REPO_B, baseBranch: 'main' });
       expect(submitResult.workflowId).toBe('wf-e2e-1');
       expect(sessions.get(sessionId)?.status).toBe('submitted');
       expect(sessions.get(sessionId)?.submittedWorkflowId).toBe('wf-e2e-1');

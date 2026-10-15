@@ -1766,6 +1766,9 @@ export function setPlanningChatTerminalMode(
   return { ok: true };
 }
 
+const REBIND_TERMINAL_OPEN_ERROR = 'Stop the terminal before changing the repository.';
+const REBIND_TURN_RUNNING_ERROR = 'Wait for the current planner turn to finish before changing the repository.';
+
 export async function rebindPlanningChatRepo(
   request: InAppPlanningRebindRepoRequest,
   deps: Pick<
@@ -1787,8 +1790,11 @@ export async function rebindPlanningChatRepo(
   if (session.status === 'submitted') {
     return { ok: false, error: 'This planning session was already submitted. Start a new planning chat for changes.' };
   }
-  if (session.messages.length > 0 || session.terminalSessionId) {
-    return { ok: false, error: 'Set the repo before the conversation or terminal starts.' };
+  if (session.terminalSessionId) {
+    return { ok: false, error: REBIND_TERMINAL_OPEN_ERROR };
+  }
+  if (session.activeTurnStatus === 'running') {
+    return { ok: false, error: REBIND_TURN_RUNNING_ERROR };
   }
   if (!deps.repoPool) {
     return { ok: false, error: 'Worktree provisioning is not available.' };

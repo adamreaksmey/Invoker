@@ -60,6 +60,36 @@ describe('planning composer repo binding', () => {
     expect(screen.getByTestId('invoker-terminal-clone-status')).toHaveTextContent('Cloned tmp/repo-a on main.');
     expect(screen.getAllByText('Cloned tmp/repo-a on main.').length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByTestId('invoker-terminal-repo-error')).not.toBeInTheDocument();
+    expect(screen.getByTestId('invoker-terminal-repo')).toBeDisabled();
+    expect(screen.getByTestId('invoker-terminal-base-branch')).toBeDisabled();
+    expect(screen.getByTestId('invoker-terminal-repo-edit')).toBeInTheDocument();
+  });
+
+  it('checks the repository again after Edit and Done', async () => {
+    render(<App />);
+    await openComposerOptions();
+
+    const repoInput = screen.getByTestId('invoker-terminal-repo');
+    fireEvent.change(repoInput, { target: { value: '/tmp/repo-a' } });
+    fireEvent.keyDown(repoInput, { key: 'Enter' });
+    await screen.findByTestId('invoker-terminal-repo-edit');
+
+    fireEvent.click(screen.getByTestId('invoker-terminal-repo-edit'));
+    fireEvent.change(screen.getByTestId('invoker-terminal-repo'), { target: { value: '/tmp/repo-b' } });
+    fireEvent.click(screen.getByTestId('invoker-terminal-repo-done'));
+
+    await waitFor(() => {
+      expect(mock.api.planningChatRebindRepo).toHaveBeenCalledTimes(2);
+    });
+    expect(mock.api.planningChatRebindRepo).toHaveBeenLastCalledWith({
+      sessionId: 'session-1',
+      repoUrl: '/tmp/repo-b',
+      baseBranch: 'main',
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('invoker-terminal-repo')).toBeDisabled();
+    });
+    expect(screen.queryByTestId('invoker-terminal-repo-validating')).not.toBeInTheDocument();
   });
 
   it('shows the bind error and keeps the previous binding when the rebind is refused', async () => {
@@ -219,7 +249,7 @@ describe('planning composer repo binding', () => {
     expect(screen.queryByTestId('invoker-terminal-send-spinner')).not.toBeInTheDocument();
   });
 
-  it('hides the repo field once the conversation has messages', async () => {
+  it('keeps the repository fields disabled after the conversation has messages', async () => {
     mock.api.planningChatList = vi.fn(async () => ({
       ok: true,
       sessions: [
@@ -245,7 +275,9 @@ describe('planning composer repo binding', () => {
       expect(screen.getByTestId('invoker-terminal-harness')).toBeInTheDocument();
     });
 
-    expect(screen.queryByTestId('invoker-terminal-repo')).not.toBeInTheDocument();
+    expect(screen.getByTestId('invoker-terminal-repo')).toBeDisabled();
+    expect(screen.getByTestId('invoker-terminal-base-branch')).toBeDisabled();
+    expect(screen.getByTestId('invoker-terminal-repo-edit')).toBeInTheDocument();
   });
 
   it('clears the local placeholder repo binding when a later refresh reports no server binding', async () => {

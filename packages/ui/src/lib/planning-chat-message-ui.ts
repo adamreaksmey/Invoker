@@ -104,6 +104,7 @@ export interface PlanningChatCollapsedLine {
   tone?: 'muted' | 'error' | 'success';
   count: number;
   kind: PlanningChatSenderKind;
+  createdAt?: string;
 }
 
 export function planningChatSenderKind(
@@ -121,6 +122,7 @@ export function collapsePlanningChatLines<T extends {
   text: string;
   role: 'user' | 'assistant' | 'system';
   tone?: 'muted' | 'error' | 'success';
+  createdAt?: string;
 }>(lines: T[]): PlanningChatCollapsedLine[] {
   const collapsed: PlanningChatCollapsedLine[] = [];
   for (const line of lines) {
@@ -135,16 +137,64 @@ export function collapsePlanningChatLines<T extends {
       previous.count += 1;
       continue;
     }
-    collapsed.push({
-      id: line.id,
-      text: line.text,
-      role: line.role,
-      tone: line.tone,
-      count: 1,
-      kind,
-    });
+    collapsed.push(collapsedPlanningChatLine(line, kind));
   }
   return collapsed;
+}
+
+function collapsedPlanningChatLine(
+  line: {
+    id: number;
+    text: string;
+    role: 'user' | 'assistant' | 'system';
+    tone?: 'muted' | 'error' | 'success';
+    createdAt?: string;
+  },
+  kind: PlanningChatSenderKind,
+): PlanningChatCollapsedLine {
+  return {
+    id: line.id,
+    text: line.text,
+    role: line.role,
+    tone: line.tone,
+    count: 1,
+    kind,
+    ...(line.createdAt ? { createdAt: line.createdAt } : {}),
+  };
+}
+
+const CLOCK_HOURS = 12;
+const MINUTE_PAD_LENGTH = 2;
+const PAD_DIGIT = '0';
+const MERIDIEM_AM = 'AM';
+const MERIDIEM_PM = 'PM';
+
+function formatClockLabel(parsed: Date): string {
+  const hour24 = parsed.getHours();
+  const hour12 = hour24 % CLOCK_HOURS || CLOCK_HOURS;
+  const minute = String(parsed.getMinutes()).padStart(MINUTE_PAD_LENGTH, PAD_DIGIT);
+  const meridiem = hour24 >= CLOCK_HOURS ? MERIDIEM_PM : MERIDIEM_AM;
+  return `${hour12}:${minute} ${meridiem}`;
+}
+
+function isSameLocalDay(left: Date, right: Date): boolean {
+  return left.getFullYear() === right.getFullYear()
+    && left.getMonth() === right.getMonth()
+    && left.getDate() === right.getDate();
+}
+
+function formatShortDate(parsed: Date): string {
+  const month = parsed.toLocaleString(undefined, { month: 'short' });
+  return `${month} ${parsed.getDate()}`;
+}
+
+export function formatPlanningChatTimestamp(createdAt: string | undefined, now: Date = new Date()): string | null {
+  if (!createdAt) return null;
+  const parsed = new Date(createdAt);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const clock = formatClockLabel(parsed);
+  if (isSameLocalDay(parsed, now)) return clock;
+  return `${formatShortDate(parsed)}, ${clock}`;
 }
 
 export interface PlanningChatMessageGroup {

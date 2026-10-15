@@ -74,6 +74,7 @@ bash scripts/test-cron-prune-stale-workdirs.sh
 bash scripts/test-cron-session-token-push.sh
 bash scripts/test-e2e-common-helper.sh
 bash scripts/test-plan-effectiveness-gate.sh
+bash scripts/test-plan-placeholder-todo-word.sh
 bash scripts/test-remote-ci-verify-env-quoting.sh
 bash scripts/test-workspace-test-flaky-wiring.sh
 bash scripts/test-linear-ticket-intake.sh

@@ -49,6 +49,7 @@ export function planningSessionFromSummary(
       text: line.text,
       role: line.role,
       tone: line.tone,
+      createdAt: line.createdAt,
     })),
     input: '',
     busy: summary.activeTurnStatus === 'running',

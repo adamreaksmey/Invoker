@@ -3057,8 +3057,9 @@ describe('rebindPlanningChatRepo', () => {
     expect(stored?.conversation).toBe(originalConversation);
   });
 
-  it('rejects rebinding once the conversation has a message', async () => {
-    const repoPool = createFakeRebindRepoPool('/fake/worktree/should-not-be-used', 'new-head-sha');
+  it('rebinds after the conversation has a message', async () => {
+    const worktreePath = '/fake/worktree/message-retarget';
+    const repoPool = createFakeRebindRepoPool(worktreePath, 'new-head-sha');
     const sessions = createInAppPlanningChatSessions();
     const session = planningSession({
       id: 'message-rebind-session',
@@ -3072,7 +3073,6 @@ describe('rebindPlanningChatRepo', () => {
         { id: 1, role: 'user', text: 'What does this repo do?', createdAt: '2026-07-07T00:00:01.000Z' },
       ],
     });
-    const originalConversation = session.conversation;
     sessions.set(session.id, session);
 
     const result = await rebindPlanningChatRepo({
@@ -3085,19 +3085,13 @@ describe('rebindPlanningChatRepo', () => {
       repoPool,
     });
 
-    expect(result).toEqual({
-      ok: false,
-      error: 'Set the repo before the conversation or terminal starts.',
-    });
-    expect(repoPool.ensureCloneThroughRepoQueue).not.toHaveBeenCalled();
-    expect(repoPool.acquireWorktree).not.toHaveBeenCalled();
-    expect(repoPool.release).not.toHaveBeenCalled();
-
+    expect(result).toEqual({ ok: true, action: 'provision', baseBranch: 'main' });
+    expect(repoPool.ensureCloneThroughRepoQueue).toHaveBeenCalled();
     const stored = sessions.get(session.id);
-    expect(stored?.repoUrl).toBe('https://example.com/repo.git');
-    expect(stored?.baseCommit).toBe('sha-a');
-    expect(stored?.worktreePath).toBe('/fake/worktree/existing-message');
-    expect(stored?.conversation).toBe(originalConversation);
+    expect(stored?.repoUrl).toBe('https://example.com/other-repo.git');
+    expect(stored?.baseCommit).toBe('new-head-sha');
+    expect(stored?.worktreePath).toBe(worktreePath);
+    expect(stored?.messages.some((message) => message.role === 'user' && message.text === 'What does this repo do?')).toBe(true);
   });
 
   it('rejects rebinding once a terminal session exists', async () => {
@@ -3129,7 +3123,7 @@ describe('rebindPlanningChatRepo', () => {
 
     expect(result).toEqual({
       ok: false,
-      error: 'Set the repo before the conversation or terminal starts.',
+      error: 'Stop the terminal before changing the repository.',
     });
     expect(repoPool.ensureCloneThroughRepoQueue).not.toHaveBeenCalled();
     expect(repoPool.acquireWorktree).not.toHaveBeenCalled();
@@ -3139,6 +3133,39 @@ describe('rebindPlanningChatRepo', () => {
     expect(stored?.baseCommit).toBe('sha-a');
     expect(stored?.worktreePath).toBe('/fake/worktree/existing-terminal');
     expect(stored?.conversation).toBe(originalConversation);
+  });
+
+  it('rejects rebinding while a planner turn is running', async () => {
+    const repoPool = createFakeRebindRepoPool('/fake/worktree/should-not-be-used', 'new-head-sha');
+    const sessions = createInAppPlanningChatSessions();
+    const session = planningSession({
+      id: 'running-turn-rebind-session',
+      title: 'Running turn rebind',
+      repoUrl: 'https://example.com/repo.git',
+      baseBranch: 'main',
+      baseCommit: 'sha-a',
+      worktreePath: '/fake/worktree/existing-running',
+      activeTurnStatus: 'running',
+      activeTurnId: 'turn-1',
+    });
+    sessions.set(session.id, session);
+
+    const result = await rebindPlanningChatRepo({
+      sessionId: session.id,
+      repoUrl: 'https://example.com/other-repo.git',
+      baseBranch: 'main',
+    }, {
+      config: {},
+      sessions,
+      repoPool,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: 'Wait for the current planner turn to finish before changing the repository.',
+    });
+    expect(repoPool.ensureCloneThroughRepoQueue).not.toHaveBeenCalled();
+    expect(sessions.get(session.id)?.repoUrl).toBe('https://example.com/repo.git');
   });
 
   it('rebinds an untouched session with a prior binding to a different repo', async () => {

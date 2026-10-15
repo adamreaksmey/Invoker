@@ -319,6 +319,7 @@ describe('Invoker terminal (component)', () => {
       lines: [{ id: 1, text: 'First line', role: 'system' as const }],
       busy: false,
       value: '',
+      repoValue: 'https://example.com/planning-repo.git',
       selectedPresetKey: 'codex',
       presetOptions: [{ key: 'codex', label: 'Codex', tool: 'codex' }],
       selectedConfirmationMode: 'require' as const,
@@ -391,6 +392,9 @@ describe('Invoker terminal (component)', () => {
 
     expect(screen.queryByTestId('invoker-terminal-cancel')).not.toBeInTheDocument();
     expect(screen.getByTestId('invoker-terminal-send-spinner')).toBeInTheDocument();
+    expect(screen.getByTestId('invoker-terminal-repo-validating')).toHaveTextContent(
+      'Validating the repository. Please wait.',
+    );
   });
 
   it('renders separate harness and model selectors while emitting configured preset keys', () => {
@@ -503,6 +507,27 @@ describe('Invoker terminal (component)', () => {
     expect(bubble.className).toContain('justify-end');
     expect(bubble).toHaveTextContent('Plan a feature');
     expect(screen.queryByText('You')).not.toBeInTheDocument();
+  });
+
+  it('shows a local timestamp under each planning chat message', () => {
+    const userSentAt = new Date(2026, 9, 15, 17, 6, 0).toISOString();
+    const assistantSentAt = new Date(2026, 9, 15, 17, 8, 0).toISOString();
+    render(<InvokerTerminal
+      {...terminalProps({
+        lines: [
+          { id: 1, text: 'Cloned repo on main.', role: 'system', tone: 'success', createdAt: userSentAt },
+          { id: 2, text: 'Plan a feature', role: 'user', createdAt: userSentAt },
+          { id: 3, text: 'Here is a draft.', role: 'assistant', createdAt: assistantSentAt },
+        ],
+      })}
+    />);
+
+    const times = screen.getAllByTestId('invoker-terminal-message-time');
+    expect(times).toHaveLength(3);
+    expect(times[0]).toHaveAttribute('dateTime', userSentAt);
+    expect(times[0]).toHaveTextContent('5:06 PM');
+    expect(times[2]).toHaveAttribute('dateTime', assistantSentAt);
+    expect(times[2]).toHaveTextContent('5:08 PM');
   });
 
   it('preserves a still-valid model when switching harnesses', () => {
@@ -2515,8 +2540,9 @@ describe('Invoker terminal (component)', () => {
 
     const sendButton = screen.getByRole('button', { name: 'Send' });
     expect(sendButton).toHaveClass('bg-amber-400');
-    expect(sendButton).toHaveClass('text-white');
+    expect(sendButton).toHaveClass('text-neutral-950');
     expect(sendButton).toHaveClass('hover:bg-amber-300');
+    expect(sendButton).toHaveClass('rounded-lg');
   });
 
   it('keeps the icon-only Send button disabled for empty input, binding, and read-only sessions', () => {

@@ -658,10 +658,6 @@ export function App() {
   const activePlanningWorkflowRunning = activePlanningSession.submittedWorkflowId
     ? workflows.get(activePlanningSession.submittedWorkflowId)?.status === 'running'
     : false;
-  const activePlanningRepoLocked = activePlanningSession.messages.some((message) => message.role !== 'system')
-    || Boolean(activePlanningSession.terminalSession)
-    || activePlanningSession.mode === 'tmux'
-    || activePlanningReadOnly;
   const planningRepoSuggestions = useMemo(() => {
     const repos = new Set<string>();
     for (const workflow of workflows.values()) {
@@ -2472,7 +2468,7 @@ export function App() {
     const updatedAt = new Date().toISOString();
     const appendLine = (session: PlanningSessionView): PlanningSessionView => ({
       ...session,
-      messages: [...session.messages, { id, text, role, tone }],
+      messages: [...session.messages, { id, text, role, tone, createdAt: updatedAt }],
       updatedAt,
     });
     if (targetSessionId) {
@@ -2508,6 +2504,7 @@ export function App() {
             id: replyLineId,
             text: outcome.reply,
             role: 'assistant' as const,
+            createdAt: updatedAt,
             ...(outcome.reasoning ? { reasoning: outcome.reasoning } : {}),
           }],
           draftPlanAvailable: outcome.draftPlanAvailable,
@@ -2912,6 +2909,13 @@ export function App() {
 
   const planningRepoCommitInFlightRef = useRef<Promise<{ ok: boolean; sessionId: string | null; error?: string }> | null>(null);
   const [planningRepoBindingId, setPlanningRepoBindingId] = useState<string | null>(null);
+  const [planningRepoEditing, setPlanningRepoEditing] = useState(false);
+  const planningRepoEditingRef = useRef(false);
+  planningRepoEditingRef.current = planningRepoEditing;
+
+  useEffect(() => {
+    setPlanningRepoEditing(false);
+  }, [activePlanningSessionId]);
 
   const commitPlanningRepo = useCallback((): Promise<{ ok: boolean; sessionId: string | null; error?: string }> => {
     // Clicking Send or Tmux blurs the repo input, so the blur commit and the
@@ -2920,22 +2924,19 @@ export function App() {
     if (inFlight) return inFlight;
 
     const run = (async (): Promise<{ ok: boolean; sessionId: string | null; error?: string }> => {
+      const EMPTY_REPO_EDIT_MESSAGE = 'Enter a repository before checking it again.';
       // Read the latest view state from refs: render closures go stale across
       // the awaits below and would re-materialize an already-swapped session.
       const viewSessionId = activePlanningSessionIdRef.current;
       const session = planningSessionsRef.current.find((current) => current.id === viewSessionId);
       if (!session) return { ok: true, sessionId: null };
       const currentBackendId = session.id.startsWith('local-') ? null : session.id;
-      const locked = session.messages.some((message) => message.role !== 'system')
-        || Boolean(session.terminalSession)
-        || session.mode === 'tmux'
-        || session.status === 'submitted'
-        || runtimeStatus?.readOnly === true;
+      const readOnlySession = session.status === 'submitted' || runtimeStatus?.readOnly === true;
       const pending = (session.repoInput ?? session.repoUrl ?? '').trim();
       const pendingBranch = (session.baseBranchInput ?? '').trim();
       const urlUnchanged = Boolean(session.repoUrl) && pending === session.repoUrl;
       const branchUnchanged = pendingBranch.length === 0 || pendingBranch === (session.baseBranch ?? '');
-      if (locked || !pending || (urlUnchanged && branchUnchanged)) {
+      if (readOnlySession) {
         return { ok: true, sessionId: currentBackendId };
       }
 
@@ -2947,6 +2948,16 @@ export function App() {
         appendTerminalLine(line, 'system', 'error', id);
         return { ok: false, sessionId: sessionIdForResult, error: message };
       };
+      if (!pending) {
+        if (!planningRepoEditingRef.current) {
+          return { ok: true, sessionId: currentBackendId };
+        }
+        return failBind(viewId, currentBackendId, EMPTY_REPO_EDIT_MESSAGE);
+      }
+      if (urlUnchanged && branchUnchanged) {
+        setPlanningRepoEditing(false);
+        return { ok: true, sessionId: currentBackendId };
+      }
       setPlanningRepoBindingId(viewId);
       updatePlanningSessionById(viewId, (current) => ({ ...current, repoError: null, repoNotice: null }));
       if (!sessionId) {
@@ -3014,10 +3025,12 @@ export function App() {
           baseBranch: resolvedBranch || current.baseBranch,
           baseCommit: undefined,
           repoInput: undefined,
+          baseBranchInput: undefined,
           repoError: null,
           repoNotice: notice,
         }));
         appendTerminalLine(notice, 'system', 'success', viewId);
+        setPlanningRepoEditing(false);
         return { ok: true, sessionId };
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to bind the repository.';
@@ -3042,6 +3055,18 @@ export function App() {
     updatePlanningSessionById,
   ]);
 
+  const startPlanningRepoEdit = useCallback(() => {
+    const session = planningSessionsRef.current.find((current) => current.id === activePlanningSessionIdRef.current);
+    const typedBranch = (session?.baseBranchInput ?? '').trim();
+    if (session && !typedBranch && session.baseBranch) {
+      updatePlanningSessionById(session.id, (current) => ({
+        ...current,
+        baseBranchInput: current.baseBranch ?? '',
+      }));
+    }
+    setPlanningRepoEditing(true);
+  }, [updatePlanningSessionById]);
+
   const handlePlanningSubmit = useCallback(async () => {
     const input = planningInput.trim();
     if (!input || activePlanningSessionBusy || activePlanningReadOnly) return;
@@ -3058,10 +3083,14 @@ export function App() {
       return;
     }
 
+    const pendingBranch = (liveSession?.baseBranchInput ?? activePlanningSession.baseBranchInput ?? '').trim();
+    const boundBranch = liveSession?.baseBranch ?? activePlanningSession.baseBranch ?? '';
+    const branchChanged = pendingBranch.length > 0 && pendingBranch !== boundBranch;
+    const repoChanged = pendingRepoInput.length > 0 && pendingRepoInput !== boundRepoUrl;
     let sendSessionId = planningSessionId;
     let activeViewId = activePlanningSessionId;
     let explicitRepoBindingApplied = false;
-    if (!activePlanningRepoLocked && pendingRepoInput && pendingRepoInput !== (activePlanningSession.repoUrl ?? '')) {
+    if (planningRepoEditingRef.current || repoChanged || branchChanged) {
       const bind = await commitPlanningRepo();
       if (!bind.ok) return;
       if (bind.sessionId) {
@@ -3156,7 +3185,6 @@ export function App() {
     activePlanningSessionBusy,
     activePlanningSessionId,
     activePlanningReadOnly,
-    activePlanningRepoLocked,
     appendTerminalLine,
     commitPlanningRepo,
     clearPlanningStreamForSessionIds,
@@ -4896,8 +4924,11 @@ export function App() {
             workflowRunning={activePlanningWorkflowRunning}
             submittedPlanName={activePlanningSession.submittedPlanName}
             repoValue={activePlanningSession.repoInput ?? activePlanningSession.repoUrl ?? ''}
-            baseBranchValue={activePlanningSession.baseBranchInput ?? ''}
-            repoLocked={activePlanningRepoLocked}
+            baseBranchValue={planningRepoEditing
+              ? (activePlanningSession.baseBranchInput ?? activePlanningSession.baseBranch ?? '')
+              : (activePlanningSession.baseBranchInput || activePlanningSession.baseBranch || '')}
+            repoBound={Boolean(activePlanningSession.repoUrl)}
+            repoEditing={planningRepoEditing}
             repoSuggestions={planningRepoSuggestions}
             repoError={activePlanningSession.repoError ?? null}
             repoNotice={activePlanningSession.repoNotice ?? null}
@@ -4916,6 +4947,7 @@ export function App() {
             onRepoInputChange={handlePlanningRepoInputChange}
             onBaseBranchInputChange={handlePlanningBaseBranchInputChange}
             onRepoCommit={() => void commitPlanningRepo()}
+            onRepoEdit={startPlanningRepoEdit}
             onModeChange={(mode) => void handlePlanningModeChange(mode)}
             onExpand={() => setPlanningTerminalExpanded(true)}
             onCloseExpanded={() => setPlanningTerminalExpanded(false)}
