@@ -34,8 +34,9 @@ export function attachPickerEntries(
   workflows: Iterable<Pick<WorkflowMeta, 'id' | 'name' | 'externalDependencies'>>,
   downstreamWorkflowId: string | null,
 ): AttachPickerEntry[] {
-  const linked = linkedUpstreamIds(workflows, downstreamWorkflowId);
-  return [...workflows]
+  const workflowList = [...workflows];
+  const linked = linkedUpstreamIds(workflowList, downstreamWorkflowId);
+  return workflowList
     .filter((workflow) => workflow.id !== downstreamWorkflowId && !linked.has(workflow.id))
     .map((workflow) => ({ id: workflow.id, name: workflow.name }));
 }
@@ -46,6 +47,25 @@ export function attachedWorkflowNotice(pending: PendingWorkflowAttach): string {
 
 export function duplicateAttachMessage(downstreamName: string, upstreamName: string): string {
   return `${downstreamName} is already attached to ${upstreamName}.`;
+}
+
+export function workflowPickerMatches(value: string, search: string): boolean {
+  const query = search.trim().toLowerCase();
+  if (query.length === 0) return true;
+  return value.toLowerCase().includes(query);
+}
+
+export function upstreamWaitLabel(
+  dependencies: readonly { workflowId: string }[] | undefined,
+  names: ReadonlyMap<string, string>,
+): string | undefined {
+  const attached = dependencies ?? [];
+  if (attached.length === 0) return undefined;
+  if (attached.length === 1) {
+    const upstreamId = attached[0].workflowId;
+    return `Waits on ${names.get(upstreamId) ?? upstreamId}`;
+  }
+  return `Waits on ${attached.length} upstream workflows`;
 }
 
 function linkedUpstreamIds(

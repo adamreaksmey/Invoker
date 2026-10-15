@@ -188,6 +188,7 @@ describe('Merge gate approval flow (integration)', () => {
 
     expect(await screen.findByTestId('github-merge-notice')).toHaveTextContent('already open');
     expect(screen.queryByRole('button', { name: 'Approve Merge' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject Merge' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Confirm Create PR' })).not.toBeInTheDocument();
   });
 });

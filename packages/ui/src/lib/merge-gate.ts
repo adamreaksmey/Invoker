@@ -48,10 +48,10 @@ function hasKnownMergeGatePrefix(description: string): boolean {
 }
 
 const PUBLISHED_GITHUB_MERGE_NOTICE =
-  'This pull request is already open. Merge it on GitHub, then refresh. This plan finishes after GitHub reports that merge.';
+  'This pull request is already open on GitHub. Merge it there. This screen does not merge it. Invoker marks the plan done after it sees that merge.';
 
 const UNPUBLISHED_GITHUB_MERGE_NOTICE =
-  'Merge this plan on GitHub, then refresh. This plan finishes after GitHub reports that merge.';
+  'This plan finishes on GitHub, not from this screen. Merge the pull request there. Invoker marks the plan done after it sees that merge.';
 
 interface MergeGateFinish {
   onFinish?: string;

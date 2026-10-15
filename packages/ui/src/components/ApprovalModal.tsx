@@ -291,14 +291,16 @@ export function ApprovalModal({
           <Button type="button" variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            disabled={submitting}
-            onClick={handleReject}
-          >
-            {submitting && showRejectInput ? SUBMITTING_DECISION_LABEL : rejectButtonLabel}
-          </Button>
+          {!leavesMergeOnGitHub && (
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={submitting}
+              onClick={handleReject}
+            >
+              {submitting && showRejectInput ? SUBMITTING_DECISION_LABEL : rejectButtonLabel}
+            </Button>
+          )}
           {!showRejectInput && !leavesMergeOnGitHub && (
             <Button
               type="button"

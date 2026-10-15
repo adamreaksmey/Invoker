@@ -4,7 +4,9 @@ import {
   attachedWorkflowNotice,
   duplicateAttachMessage,
   finishedWorkflowAttachOptions,
+  upstreamWaitLabel,
   workflowDependsOnUpstream,
+  workflowPickerMatches,
 } from '../lib/attach-workflow-request.js';
 
 describe('attach workflow request', () => {
@@ -27,6 +29,10 @@ describe('attach workflow request', () => {
 
     expect(workflowDependsOnUpstream(workflows[0], 'wf-up')).toBe(true);
     expect(attachPickerEntries(workflows, 'wf-down')).toEqual([{ id: 'wf-other', name: 'Other' }]);
+    const liveWorkflows = new Map(workflows.map((workflow) => [workflow.id, workflow]));
+    expect(attachPickerEntries(liveWorkflows.values(), 'wf-down')).toEqual([
+      { id: 'wf-other', name: 'Other' },
+    ]);
     expect(duplicateAttachMessage('Downstream', 'Upstream')).toBe(
       'Downstream is already attached to Upstream.',
     );
@@ -36,5 +42,20 @@ describe('attach workflow request', () => {
       downstreamName: 'Downstream',
       upstreamName: 'Upstream',
     })).toContain('The dependency was added.');
+  });
+
+  it('matches a workflow name even when the query is only part of it', () => {
+    expect(workflowPickerMatches('Apply Times New Roman wf-2', '')).toBe(true);
+    expect(workflowPickerMatches('Apply Times New Roman wf-2', 'times new')).toBe(true);
+    expect(workflowPickerMatches('Apply Times New Roman wf-2', 'vue')).toBe(false);
+  });
+
+  it('names the upstream a plan waits on', () => {
+    const names = new Map([['wf-up', 'Set all app text to 15px']]);
+    expect(upstreamWaitLabel([{ workflowId: 'wf-up' }], names)).toBe('Waits on Set all app text to 15px');
+    expect(upstreamWaitLabel([{ workflowId: 'wf-up' }, { workflowId: 'wf-other' }], names)).toBe(
+      'Waits on 2 upstream workflows',
+    );
+    expect(upstreamWaitLabel([], names)).toBeUndefined();
   });
 });

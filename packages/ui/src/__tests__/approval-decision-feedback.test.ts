@@ -20,7 +20,7 @@ describe('operatorDecisionFailureCopy', () => {
 
     expect(copy.title).toBe('Pull request is still open');
     expect(copy.message).toBe(
-      'Pull request #2 is still open. Merge it on GitHub, then refresh. This plan finishes after GitHub reports that merge.',
+      'Pull request #2 is still open on GitHub. Merge it there. This screen does not merge it. Invoker marks the plan done after it sees that merge.',
     );
   });
 

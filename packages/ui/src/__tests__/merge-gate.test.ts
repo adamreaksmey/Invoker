@@ -248,8 +248,9 @@ describe('mergeGateLeavesMergeToGitHub', () => {
   });
 
   it('tells the operator to merge on GitHub', () => {
-    expect(githubMergeNotice('https://github.com/example/repo/pull/2')).toContain('already open');
-    expect(githubMergeNotice()).toContain('Merge this plan on GitHub');
+    expect(githubMergeNotice('https://github.com/example/repo/pull/2')).toContain('already open on GitHub');
+    expect(githubMergeNotice('https://github.com/example/repo/pull/2')).toContain('does not merge');
+    expect(githubMergeNotice()).toContain('not from this screen');
   });
 });
 

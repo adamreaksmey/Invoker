@@ -227,6 +227,7 @@ describe('WorkflowGraph', () => {
     expect(edge).toHaveAttribute('data-kind', 'active');
     expect(edge).toHaveAttribute('data-stroke-dasharray', '');
     expect(edge).toHaveAccessibleName('Active workflow dependency');
+    expect(screen.getByTestId('workflow-node-wf-b-upstream')).toHaveTextContent('Waits on wf-a');
   });
 
   it('renders dependency-change lineage edges separately from active dependency edges', () => {

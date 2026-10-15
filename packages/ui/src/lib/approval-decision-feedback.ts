@@ -27,5 +27,5 @@ export function operatorDecisionFailureCopy(
 }
 
 function openPullRequestStillOpenMessage(pullRequestNumber: string): string {
-  return `Pull request #${pullRequestNumber} is still open. Merge it on GitHub, then refresh. This plan finishes after GitHub reports that merge.`;
+  return `Pull request #${pullRequestNumber} is still open on GitHub. Merge it there. This screen does not merge it. Invoker marks the plan done after it sees that merge.`;
 }

@@ -666,20 +666,18 @@ export function WorkflowInspector({
               {githubMergeNotice(task.execution.reviewUrl)}
             </p>
           )}
-          {showApprovalActions && task && (
+          {showApprovalActions && task && !leavesMergeOnGitHub && (
             <div className="mt-3 flex gap-2 border-t border-border pt-3">
-              {!leavesMergeOnGitHub && (
-                <button
-                  type="button"
-                  onClick={() => onApprove?.(task)}
-                  data-testid="inspector-approve-button"
-                  data-sidebar-nav-item
-                  data-sidebar-nav-order="15"
-                  className="flex-1 rounded bg-green-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-green-500"
-                >
-                  {isFixApproval ? 'Approve Fix' : task.config.isMergeNode ? 'Approve Merge' : 'Approve'}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => onApprove?.(task)}
+                data-testid="inspector-approve-button"
+                data-sidebar-nav-item
+                data-sidebar-nav-order="15"
+                className="flex-1 rounded bg-green-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-green-500"
+              >
+                {isFixApproval ? 'Approve Fix' : task.config.isMergeNode ? 'Approve Merge' : 'Approve'}
+              </button>
               <button
                 type="button"
                 onClick={() => onReject?.(task)}

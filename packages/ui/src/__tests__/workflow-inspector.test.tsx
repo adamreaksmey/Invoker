@@ -864,8 +864,9 @@ describe('WorkflowInspector', () => {
     );
 
     expect(screen.queryByRole('button', { name: 'Approve Merge' })).not.toBeInTheDocument();
-    expect(screen.getByTestId('github-merge-notice')).toHaveTextContent('already open');
-    expect(screen.getByRole('button', { name: 'Reject Merge' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Reject Merge' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('github-merge-notice')).toHaveTextContent('does not merge');
+    expect(screen.getByTestId('inspector-pr-link')).toHaveAttribute('href', 'https://github.com/example/repo/pull/2');
   });
 
   it('keeps Approve Merge when Invoker merges the branch itself', () => {

@@ -785,7 +785,7 @@ describe('ApprovalModal', () => {
         onClose={onClose}
         onFinish="pull_request"
         mergeMode="manual"
-        decisionError="Pull request #2 is still open. Merge it on GitHub, then refresh. This plan finishes after GitHub reports that merge."
+        decisionError="Pull request #2 is still open on GitHub. Merge it there. This screen does not merge it. Invoker marks the plan done after it sees that merge."
       />,
     );
     expect(screen.getByRole('heading', { name: 'Pull request is on GitHub' })).toBeInTheDocument();
@@ -860,7 +860,8 @@ describe('ApprovalModal', () => {
     );
     expect(screen.getByRole('heading', { name: 'Pull request is on GitHub' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Confirm Create PR' })).not.toBeInTheDocument();
-    expect(screen.getByTestId('github-merge-notice')).toHaveTextContent('Merge this plan on GitHub');
+    expect(screen.getByTestId('github-merge-notice')).toHaveTextContent('not from this screen');
+    expect(screen.queryByRole('button', { name: 'Reject PR' })).not.toBeInTheDocument();
   });
 
   it('renders the merge summary as markdown', () => {
@@ -912,7 +913,7 @@ describe('ApprovalModal', () => {
     expect(screen.getByRole('button', { name: 'Confirm Merge' })).toBeInTheDocument();
   });
 
-  it('reject button says "Reject PR" (not "Reject Merge") for onFinish="pull_request"', () => {
+  it('hides reject when the plan finishes on GitHub', () => {
     render(
       <ApprovalModal
         task={makeTask({ config: { isMergeNode: true } })}
@@ -922,20 +923,8 @@ describe('ApprovalModal', () => {
         onFinish="pull_request"
       />,
     );
-    expect(screen.getByRole('button', { name: 'Reject PR' })).toBeInTheDocument();
-  });
-
-  it('confirm-reject button says "Confirm Reject PR" for onFinish="pull_request"', () => {
-    render(
-      <ApprovalModal
-        task={makeTask({ config: { isMergeNode: true } })}
-        onApprove={vi.fn()}
-        onReject={vi.fn()}
-        onClose={vi.fn()}
-        onFinish="pull_request"
-      />,
-    );
-    fireEvent.click(screen.getByRole('button', { name: /reject/i }));
-    expect(screen.getByRole('button', { name: 'Confirm Reject PR' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject PR' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject Merge' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
   });
 });
