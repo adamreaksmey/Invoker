@@ -110,7 +110,7 @@ Click **Create workflow**.
 
 This loads the workflow in a staged state. It does not start tasks.
 
-Click **Open graph** and select the workflow node. The task DAG should show the implementation and verification tasks as pending. You can inspect their prompts, commands, dependencies, and repository metadata before execution.
+Click **Open graph** and select the workflow node. The task DAG should show the implementation and verification tasks as pending. You can inspect their prompts, commands, dependencies, and repository metadata before execution. The floating task DAG starts compact; **Larger** on its title bar expands it, and **Smaller** returns it to the compact size.
 
 Checkpoint: no task should be running yet, and the Home message should say to review the graph and then use **Start ready work**.
 
