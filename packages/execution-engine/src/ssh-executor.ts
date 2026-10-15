@@ -21,6 +21,7 @@ import {
   buildSourceInvokerEnvScript,
 } from './remote-shell-fragments.js';
 import { canonicalizeRemoteManagedWorkspacePath } from './conflict-resolver.js';
+import { resolveHandoffScrubCommand } from './handoff-scrub-command.js';
 import {
   shellPosixSingleQuote as sshGitShellQuote,
   sshInteractiveCdFragment,
@@ -614,7 +615,7 @@ ${managedWorkspaceBootstrap}${runPayloadSection}stop_bootstrap_heartbeat
     if (request.actionType === 'command') {
       const command = request.inputs.command;
       if (!command) throw new Error('WorkRequest with actionType "command" must have inputs.command');
-      payload = command;
+      payload = resolveHandoffScrubCommand(command);
       bench('SshExecutor.payload.built', { command: true });
     } else if (request.actionType === 'ai_task') {
       if (this.agentRegistry) {

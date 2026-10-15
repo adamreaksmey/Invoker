@@ -12,6 +12,7 @@ import { assertNotGitConfigMutation, ensureRemoteUrl } from './git-config-mutati
 import { isGitRefLockRace } from './git-utils.js';
 import { childProcessHasExited, cleanElectronEnv, cleanGitRepositoryEnv, killProcessGroup, SIGKILL_TIMEOUT_MS, terminateChildProcessGroup } from './process-utils.js';
 import { getExecutorStartTimeoutMs } from './task-runner-launch-support.js';
+import { resolveHandoffScrubCommand } from './handoff-scrub-command.js';
 import { appendProvisionOutputTail, spawnLocalProvisioning } from './local-provisioning.js';
 
 
@@ -1257,7 +1258,7 @@ export abstract class BaseExecutor<TEntry extends BaseEntry> implements Executor
       if (!command) throw new Error('WorkRequest with actionType "command" must have inputs.command');
       return {
         cmd: '/bin/bash',
-        args: ['-c', command],
+        args: ['-c', resolveHandoffScrubCommand(command)],
       };
     }
     if (request.actionType === 'ai_task') {

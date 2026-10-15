@@ -2384,6 +2384,15 @@ describe('BaseExecutor.buildCommandAndArgs', () => {
     executor = new TestExecutor();
   });
 
+  it('runs the handoff scrub check in the worktree when the script path is missing there', () => {
+    const req = makeRequest('act', { command: 'bash scripts/scrub-handoff-artifacts.sh' });
+    const result = executor.testBuildCommandAndArgs(req);
+    expect(result.cmd).toBe('/bin/bash');
+    expect(result.args[0]).toBe('-c');
+    expect(result.args[1]).toContain('scrub-handoff-artifacts-ok');
+    expect(result.args[1]).not.toContain('scripts/scrub-handoff-artifacts.sh');
+  });
+
   it('returns shell command for actionType=command', () => {
     const req = makeRequest('act', { command: 'echo hello' });
     req.actionType = 'command';
