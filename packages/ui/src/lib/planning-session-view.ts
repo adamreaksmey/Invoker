@@ -1,9 +1,9 @@
-import {
-  planningRepoLabel,
-  type InAppPlanningSessionStatus,
-  type InAppPlanningSessionSummary,
-  type PlanningConfirmationMode,
-  type TerminalSessionDescriptor,
+import { planningRepoLabel } from '@invoker/contracts/planning-clone-status';
+import type {
+  InAppPlanningSessionStatus,
+  InAppPlanningSessionSummary,
+  PlanningConfirmationMode,
+  TerminalSessionDescriptor,
 } from '@invoker/contracts';
 import type { InvokerTerminalLine, PlanningTerminalMode } from '../components/InvokerTerminal.js';
 

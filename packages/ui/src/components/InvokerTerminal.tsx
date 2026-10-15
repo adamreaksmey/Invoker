@@ -1,7 +1,8 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { Terminal as XTermTerminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
-import { PLANNING_CLONE_IN_PROGRESS, type TerminalSessionDescriptor } from '@invoker/contracts';
+import { PLANNING_CLONE_IN_PROGRESS } from '@invoker/contracts/planning-clone-status';
+import type { TerminalSessionDescriptor } from '@invoker/contracts';
 import type { PlanningConfirmationMode } from '@invoker/contracts';
 import {
   collapsePlanningChatLines,

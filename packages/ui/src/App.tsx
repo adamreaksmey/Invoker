@@ -12,7 +12,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef, useLayoutEffect, type MouseEvent as ReactMouseEvent, type RefObject } from 'react';
 import yaml from 'js-yaml';
 import type { ActionGraphNode, CursorModelDiscoverySummary, ExecutionDefaults, ExecutionHarnessOption, InAppPlanningChatResponse, InAppPlanningSessionStatus, InAppPlanningSessionSummary, InAppPlanningTurnOutcome, InvokerSetupRequest, InvokerSetupResult, PlanningConfirmationMode, PlanningPresetOption, PlanningPresetsResponse, ReviewGateQueryResponse, RuntimeStatus, StartReadyRequest, StartReadyResult, TerminalOutputEvent, TerminalSessionDescriptor, WorkflowMutationFailedEvent } from '@invoker/contracts';
-import { planningBindFailureLine, planningCloneReadyText } from '@invoker/contracts';
+import { planningBindFailureLine, planningCloneReadyText } from '@invoker/contracts/planning-clone-status';
 import { resolvePlanningSubmitAction } from '@invoker/contracts/planning-surface';
 import type { TaskState, TaskReplacementDef, ExternalGatePolicyUpdate, WorkflowMeta, WorkflowStatus, WorkerActionSummary, WorkerLogEntry, WorkerStatusEntry } from './types.js';
 import type { SidebarSurface } from './lib/workflow-progress-surfaces.js';
