@@ -9,7 +9,7 @@
  * - Modals overlay when needed
  */
 
-import { useState, useCallback, useMemo, useEffect, useRef, useLayoutEffect, type RefObject } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef, useLayoutEffect, type MouseEvent as ReactMouseEvent, type RefObject } from 'react';
 import yaml from 'js-yaml';
 import type { ActionGraphNode, CursorModelDiscoverySummary, ExecutionDefaults, ExecutionHarnessOption, InAppPlanningChatResponse, InAppPlanningSessionStatus, InAppPlanningSessionSummary, InAppPlanningTurnOutcome, InvokerSetupRequest, InvokerSetupResult, PlanningConfirmationMode, PlanningPresetOption, PlanningPresetsResponse, ReviewGateQueryResponse, RuntimeStatus, StartReadyRequest, StartReadyResult, TerminalOutputEvent, TerminalSessionDescriptor, WorkflowMutationFailedEvent } from '@invoker/contracts';
 import { resolvePlanningSubmitAction } from '@invoker/contracts/planning-surface';
@@ -84,7 +84,7 @@ import {
   type PlanningTerminalMode,
 } from './components/InvokerTerminal.js';
 import { WorkflowContextMenu, type ContextMenuCloseOptions } from './components/WorkflowContextMenu.js';
-import { MarkdownText } from './components/MarkdownText.js';
+import { PlanningDraftReview } from './components/PlanningDraftReview.js';
 import { Toaster, toast } from 'sonner';
 import { Trash2 } from 'lucide-react';
 import { Button } from './components/primitives/index.js';
@@ -112,6 +112,12 @@ import {
   type GraphCameraViewport,
   type GraphScope,
 } from './lib/graph-camera.js';
+import {
+  PLANNING_CONTEXT_PANEL_COLLAPSED_WIDTH,
+  clampPlanningContextPanelWidth,
+  readPlanningContextPanelWidth,
+  writePlanningContextPanelWidth,
+} from './lib/planning-context-panel-width.js';
 import type { SystemDiagnostics } from '@invoker/contracts';
 
 type ModalState =
@@ -692,6 +698,9 @@ export function App() {
   const [keyboardRegion, setKeyboardRegion] = useState<KeyboardRegion>('planning');
   const [previousGraphRegion, setPreviousGraphRegion] = useState<KeyboardRegion>('workflowGraph');
   const [planningContextCollapsed, setPlanningContextCollapsed] = useState(true);
+  const [planningContextPanelWidth, setPlanningContextPanelWidth] = useState(() => readPlanningContextPanelWidth());
+  const [planningContextResizing, setPlanningContextResizing] = useState(false);
+  const planningContextResizeStartRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const [planningSessionRailCollapsed, setPlanningSessionRailCollapsed] = useState(false);
   // Typed graph camera state. The graph viewport is user-owned after the
   // initial render: only explicit navigation commands (issued through the
@@ -2826,6 +2835,33 @@ export function App() {
     setReviewDraftSessionId(null);
   }, [activePlanningSessionId, appendTerminalLine]);
 
+  const handlePlanningContextResizeMouseDown = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (planningContextCollapsed || planningContextResizeStartRef.current) return;
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = planningContextPanelWidth;
+    planningContextResizeStartRef.current = { startX, startWidth };
+    setPlanningContextResizing(true);
+
+    const onMouseMove = (moveEvent: MouseEvent): void => {
+      if (!planningContextResizeStartRef.current) return;
+      setPlanningContextPanelWidth(
+        clampPlanningContextPanelWidth(startWidth + (startX - moveEvent.clientX)),
+      );
+    };
+    const onMouseUp = (): void => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      planningContextResizeStartRef.current = null;
+      setPlanningContextResizing(false);
+      setPlanningContextPanelWidth((current) => writePlanningContextPanelWidth(current));
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  }, [planningContextCollapsed, planningContextPanelWidth]);
+
   const handlePlanningDiscardDraft = useCallback(async () => {
     const targetSessionId = planningSessionId;
     if (!targetSessionId) return;
@@ -4600,11 +4636,26 @@ export function App() {
       draftPlanSummary ? [{ workflow: null, tasks: draftPlanSummary.steps }] : []
     );
     const keptDraft = keptPlanningDraftSessionIds.has(activePlanningSession.id);
+    const panelWidth = planningContextCollapsed
+      ? PLANNING_CONTEXT_PANEL_COLLAPSED_WIDTH
+      : planningContextPanelWidth;
     return (
       <aside
         data-testid="planning-context-panel"
-        className={`${planningContextCollapsed ? 'w-16' : 'w-72'} flex h-full min-h-0 shrink-0 flex-col border-l border-border bg-card/60 transition-all duration-150`}
+        style={{ width: panelWidth }}
+        className={`relative flex h-full min-h-0 shrink-0 flex-col border-l border-border bg-card/60 ${planningContextResizing ? '' : 'transition-[width] duration-150'}`}
       >
+        {!planningContextCollapsed && (
+          <div
+            data-testid="planning-context-resize-handle"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize review draft panel"
+            aria-valuenow={planningContextPanelWidth}
+            onMouseDown={handlePlanningContextResizeMouseDown}
+            className="absolute inset-y-0 left-0 z-10 w-1.5 -translate-x-1/2 cursor-col-resize touch-none hover:bg-border/80"
+          />
+        )}
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2.5">
           {!planningContextCollapsed && (
             <h2 className="text-sm font-semibold text-foreground">{activeDraftReviewOpen ? 'Review draft' : 'Current plan'}</h2>
@@ -4620,67 +4671,18 @@ export function App() {
           </button>
         </div>
         {!planningContextCollapsed && (
-          activeDraftReviewOpen ? (
-            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4 text-sm">
-              <p data-testid="planning-draft-locked-note" className="text-xs text-muted-foreground">
-                This draft is locked — critique in chat, or ask Invoker to re-draft, to change it.
-              </p>
-              {draftTaskGroups.map((group, groupIndex) => (
-                <section key={`${group.workflow ?? 'plan'}-${groupIndex}`} data-testid="draft-task-group">
-                  {group.workflow && <h3 className="text-xs font-medium text-foreground">{group.workflow}</h3>}
-                  <ul className={group.workflow ? 'mt-2 space-y-1.5' : 'space-y-1.5'}>
-                    {group.tasks.map((task, taskIndex) => (
-                      <li key={`${task}-${taskIndex}`} data-testid="draft-step-summary" className="text-xs leading-5 text-muted-foreground">
-                        <MarkdownText text={task} />
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              ))}
-              {draftPlanText && (
-                <pre data-testid="draft-raw-yaml" className="max-h-56 overflow-auto rounded-md border border-border bg-background p-3 text-[11px] leading-5 text-muted-foreground">
-                  {draftPlanText}
-                </pre>
-              )}
-              {activePlanningSession.confirmationMode === 'require' && (
-                <div className="grid gap-2">
-                  <Button
-                    type="button"
-                    data-testid="planning-create-workflow"
-                    onClick={() => void handlePlanningSubmitDraft()}
-                    className="w-full"
-                  >
-                    Create workflow
-                  </Button>
-                  {keptDraft ? (
-                    <button
-                      type="button"
-                      data-testid="planning-discard-draft"
-                      onClick={() => void handlePlanningDiscardDraft()}
-                      className="w-full rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-secondary"
-                    >
-                      Discard draft
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      data-testid="planning-cancel-review"
-                      onClick={handlePlanningCancelReview}
-                      className="w-full rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-secondary"
-                    >
-                      Cancel
-                    </button>
-                  )}
-                </div>
-              )}
-              <button
-                type="button"
-                onClick={() => navigatePlanGraphPreservingViewport('planning-draft-review')}
-                className="w-full rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-secondary"
-              >
-                Open graph
-              </button>
-            </div>
+          activeDraftReviewOpen && draftPlanSummary ? (
+            <PlanningDraftReview
+              draftPlanSummary={draftPlanSummary}
+              draftTaskGroups={draftTaskGroups}
+              draftPlanText={draftPlanText}
+              confirmationMode={activePlanningSession.confirmationMode}
+              keptDraft={keptDraft}
+              onCreateWorkflow={() => void handlePlanningSubmitDraft()}
+              onDiscardDraft={() => void handlePlanningDiscardDraft()}
+              onCancelReview={handlePlanningCancelReview}
+              onOpenGraph={() => navigatePlanGraphPreservingViewport('planning-draft-review')}
+            />
           ) : (
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4 text-sm">
               <div>

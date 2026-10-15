@@ -168,6 +168,7 @@ describe('Invoker terminal (component)', () => {
     getViewportMock.mockReset();
     getViewportMock.mockReturnValue({ x: 0, y: 0, zoom: 1 });
     workflowGraphSpy.reset();
+    window.localStorage.removeItem('invoker.planningContextPanelWidth');
   });
 
   afterEach(() => {
@@ -1939,6 +1940,39 @@ describe('Invoker terminal (component)', () => {
     expect(await screen.findByTestId('planning-draft-locked-note')).toHaveTextContent(
       'This draft is locked — critique in chat, or ask Invoker to re-draft, to change it.',
     );
+    expect(screen.getByTestId('draft-raw-yaml')).toHaveTextContent('name: Mock Plan');
+    expect(screen.getByTestId('planning-context-panel')).toHaveStyle({ width: '288px' });
+  });
+
+  it('widens the review draft panel by dragging the resize handle and clamps the max width', async () => {
+    mock.api.planningChatSend = vi.fn(async () => ({
+      ok: true,
+      sessionId: 'session-1',
+      reply: 'Here is the plan.',
+      draftPlanAvailable: true,
+      draftPlanSummary: { name: 'Mock Plan', taskCount: 1, steps: ['First'] },
+      draftPlanText: 'name: Mock Plan\ntasks: []\n',
+    })) as any;
+    render(<App />);
+    await openPlanningTerminal();
+    submitPlanningText('draft the full plan');
+
+    const panel = await screen.findByTestId('planning-context-panel');
+    const handle = await screen.findByTestId('planning-context-resize-handle');
+
+    fireEvent.mouseDown(handle, { button: 0, clientX: 900 });
+    act(() => {
+      window.dispatchEvent(new MouseEvent('mousemove', { clientX: 700 }));
+      window.dispatchEvent(new MouseEvent('mouseup', { clientX: 700 }));
+    });
+    expect(panel).toHaveStyle({ width: '488px' });
+
+    fireEvent.mouseDown(handle, { button: 0, clientX: 700 });
+    act(() => {
+      window.dispatchEvent(new MouseEvent('mousemove', { clientX: 100 }));
+      window.dispatchEvent(new MouseEvent('mouseup', { clientX: 100 }));
+    });
+    expect(panel).toHaveStyle({ width: '560px' });
   });
 
   it('submits a draft without starting staged work', async () => {
@@ -2009,10 +2043,13 @@ describe('Invoker terminal (component)', () => {
     expect(screen.queryByTestId('invoker-terminal-ready-bar')).not.toBeInTheDocument();
     expect(screen.getAllByTestId('draft-task-group')).toHaveLength(2);
     const multilineDescription = screen.getAllByTestId('draft-step-summary')[0];
-    expect(within(multilineDescription).getByText('contracts', { selector: 'code' })).toBeVisible();
-    expect(within(multilineDescription).getByRole('list')).toBeVisible();
-    expect(within(multilineDescription).getAllByRole('listitem')).toHaveLength(2);
-    expect(multilineDescription).toHaveTextContent('Review claim: Define contracts Review lane: behavior Files: src/a.ts src/b.ts');
+    expect(within(multilineDescription).getByText('Review claim')).toBeVisible();
+    expect(within(multilineDescription).getByText('Review lane')).toBeVisible();
+    expect(within(multilineDescription).getByText('Files')).toBeVisible();
+    expect(multilineDescription).toHaveTextContent('Define `contracts`');
+    expect(multilineDescription).toHaveTextContent('behavior');
+    expect(multilineDescription).toHaveTextContent('src/a.ts');
+    expect(multilineDescription).toHaveTextContent('src/b.ts');
     fireEvent.click(screen.getByTestId('planning-create-workflow'));
 
     await waitFor(() => {
