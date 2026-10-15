@@ -161,4 +161,33 @@ describe('Merge gate approval flow (integration)', () => {
     await waitFor(() => expect(mock.api.setWorkflowMergeMode).toHaveBeenCalledWith('wf-merge', 'external_review'));
     await waitFor(() => expect(mock.api.refreshTaskGraph).toHaveBeenCalled());
   });
+
+  it('does not offer a merge button when the pull request is already open', async () => {
+    const reviewGate = makeUITask({
+      id: '__merge__wf-merge',
+      description: 'Review gate for test plan',
+      status: 'review_ready',
+      workflowId: 'wf-merge',
+      isMergeNode: true,
+      execution: { reviewUrl: 'https://github.com/example/repo/pull/2' },
+    });
+    const reviewWorkflow: WorkflowMeta = {
+      id: 'wf-merge',
+      name: 'Merge Workflow',
+      status: 'review_ready',
+      baseBranch: 'main',
+      onFinish: 'pull_request',
+      mergeMode: 'manual',
+    };
+
+    render(<App />);
+    fireEvent.click(await screen.findByTestId('sidebar-planning'));
+    act(() => mock.setTasks([reviewGate], [reviewWorkflow]));
+    fireEvent.click(await screen.findByTestId('workflow-node-wf-merge'));
+    fireEvent.click(await screen.findByTestId('rf__node-__merge__wf-merge'));
+
+    expect(await screen.findByTestId('github-merge-notice')).toHaveTextContent('already open');
+    expect(screen.queryByRole('button', { name: 'Approve Merge' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Confirm Create PR' })).not.toBeInTheDocument();
+  });
 });

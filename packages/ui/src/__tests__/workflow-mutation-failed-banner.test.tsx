@@ -3,8 +3,8 @@
  *
  * A mutation failure never changes the sidebar surface. Task-scoped failures
  * are recorded, select the failed task, and show persistent inspector detail.
- * Approve and reject also raise a toast, because the confirmation dialog
- * closes before the owner refusal arrives. Failures with no task context are
+ * Approve and reject also raise a toast. The confirmation dialog stays open
+ * and shows the same reason. Failures with no task context are
  * transient toast errors. No global top banner is rendered.
  */
 
@@ -87,6 +87,28 @@ describe('Workflow mutation failed handling', () => {
     expect(toast.querySelector('[data-sonner-toast]')).toHaveAttribute('data-type', 'error');
     expect(toast).toHaveTextContent('Approve failed');
     expect(toast).toHaveTextContent('missing execution harness "codex"');
+  });
+
+  it('reports an attach refusal instead of saying the dependency was added', async () => {
+    render(<App />);
+    fireEvent.click(await screen.findByTestId('sidebar-planning'));
+    await settleTasks();
+
+    act(() => {
+      mock.fireWorkflowMutationFailed({
+        intentId: 9,
+        workflowId: 'wf-1',
+        channel: 'headless.exec',
+        headlessCommand: 'attach-workflow',
+        message: 'Cannot attach workflow wf-1: it is already completed, so a new dependency would never gate anything.',
+        failedAt: '2026-10-15T14:02:07.835Z',
+      });
+    });
+
+    const toast = await screen.findByLabelText('Notifications alt+T');
+    expect(toast).toHaveTextContent('Attach failed');
+    expect(toast).toHaveTextContent('already completed');
+    expect(screen.queryByTestId('detach-feedback')).not.toBeInTheDocument();
   });
 
   it('leaves the sidebar surface alone when a task-scoped failure arrives', async () => {

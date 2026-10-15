@@ -7,6 +7,8 @@ import {
   groupTasksByWorkflow,
   sortedWorkflowGroups,
   mergeGateKindFromDescription,
+  githubMergeNotice,
+  mergeGateLeavesMergeToGitHub,
   mergeGatePanelHeading,
   mergeGatePlanTitle,
   resolveMergeGateKind,
@@ -224,6 +226,30 @@ describe('isMergeGateId', () => {
   it('returns false for regular task IDs', () => {
     expect(isMergeGateId('t1')).toBe(false);
     expect(isMergeGateId('setup-env')).toBe(false);
+  });
+});
+
+describe('mergeGateLeavesMergeToGitHub', () => {
+  it('hides a local merge when the pull request is finished on GitHub', () => {
+    const task = makeMergeTask('Pull request gate for plan');
+    expect(mergeGateLeavesMergeToGitHub(task, { onFinish: 'pull_request', mergeMode: 'manual' })).toBe(true);
+    expect(mergeGateLeavesMergeToGitHub(task, { onFinish: 'merge', mergeMode: 'external_review' })).toBe(true);
+  });
+
+  it('keeps a local merge when Invoker merges the branch itself', () => {
+    const task = makeMergeTask('Merge gate for plan');
+    expect(mergeGateLeavesMergeToGitHub(task, { onFinish: 'merge', mergeMode: 'manual' })).toBe(false);
+    expect(mergeGateLeavesMergeToGitHub(task, { onFinish: 'merge', mergeMode: 'automatic' })).toBe(false);
+  });
+
+  it('keeps fix approval on a published pull request', () => {
+    const task = makeMergeTask('Pull request gate for plan', 'wf-1', { pendingFixError: 'tests failed' });
+    expect(mergeGateLeavesMergeToGitHub(task, { onFinish: 'pull_request' })).toBe(false);
+  });
+
+  it('tells the operator to merge on GitHub', () => {
+    expect(githubMergeNotice('https://github.com/example/repo/pull/2')).toContain('already open');
+    expect(githubMergeNotice()).toContain('Merge this plan on GitHub');
   });
 });
 

@@ -19,6 +19,7 @@ import {
 import { formatTaskExecutionErrorForDisplay } from '../lib/task-execution-error-display.js';
 import { useNow } from '../hooks/useNow.js';
 import { mergeGatePanelHeading } from '../lib/merge-gate.js';
+import { MarkdownText } from './MarkdownText.js';
 import { Button } from './primitives/index.js';
 interface TaskAuditEvent {
   eventType: string;
@@ -1109,7 +1110,9 @@ export function TaskPanel({
       {task.config.summary && (
         <div>
           <h3 className="text-sm font-medium text-muted-foreground mb-1">Summary</h3>
-          <p className="text-xs text-muted-foreground whitespace-pre-wrap">{task.config.summary}</p>
+          <div className="text-xs text-muted-foreground" data-testid="task-summary">
+            <MarkdownText text={task.config.summary} />
+          </div>
         </div>
       )}
 

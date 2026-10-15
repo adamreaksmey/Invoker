@@ -46,10 +46,22 @@ import { WorkerDetailsPanel } from './components/WorkerDetailsPanel.js';
 import { WorkerDetailControl } from './components/WorkerDetailControl.js';
 import { WorkerActivityCard } from './components/WorkerActivityCard.js';
 import {
+  approvalDialogStillWaiting,
+  operatorDecisionFailureCopy,
+} from './lib/approval-decision-feedback.js';
+import { mergeGateLeavesMergeToGitHub } from './lib/merge-gate.js';
+import {
   isOperatorDecisionFailure,
   mutationFailureBannerMessage,
-  mutationFailureTitle,
 } from './lib/mutation-failure-display.js';
+import {
+  attachPickerEntries,
+  attachedWorkflowNotice,
+  duplicateAttachMessage,
+  finishedWorkflowAttachOptions,
+  workflowDependsOnUpstream,
+  type PendingWorkflowAttach,
+} from './lib/attach-workflow-request.js';
 import { groupWorkflowCoreActivity } from './lib/workflow-core-activity.js';
 import { isWorkflowBuilt } from './lib/workflow-status.js';
 import { ActionGraphView } from './components/ActionGraphView.js';
@@ -130,7 +142,7 @@ import type { SystemDiagnostics } from '@invoker/contracts';
 type ModalState =
   | { type: 'none' }
   | { type: 'input'; task: TaskState }
-  | { type: 'approval'; task: TaskState; action: 'approve' | 'reject' }
+  | { type: 'approval'; task: TaskState; action: 'approve' | 'reject'; decisionError?: string }
   | { type: 'experiment'; task: TaskState }
   | { type: 'replace'; task: TaskState }
   | { type: 'bulkPoolReassignment' };
@@ -701,6 +713,7 @@ export function App() {
   const [startReadyPreviewMode, setStartReadyPreviewMode] = useState<StartReadyRailModeId>('recreateFailed');
   // Transient, user-visible outcome line for a confirmed workflow detach.
   const [detachNotice, setDetachNotice] = useState<string | null>(null);
+  const [pendingAttach, setPendingAttach] = useState<PendingWorkflowAttach | null>(null);
   const [keyboardRegion, setKeyboardRegion] = useState<KeyboardRegion>('planning');
   const [previousGraphRegion, setPreviousGraphRegion] = useState<KeyboardRegion>('workflowGraph');
   const [planningContextCollapsed, setPlanningContextCollapsed] = useState(true);
@@ -1650,14 +1663,33 @@ export function App() {
           selectTaskById(task.id);
         }
         if (isOperatorDecisionFailure(event)) {
-          notifyMutationError(mutationFailureTitle(event), mutationFailureBannerMessage(event));
+          const copy = operatorDecisionFailureCopy(event);
+          setModal((current) => (
+            current.type === 'approval' && current.task.id === failedTaskId
+              ? { ...current, decisionError: copy.message }
+              : current
+          ));
+          notifyMutationError(copy.title, copy.message);
         }
+        return;
+      }
+      if (event.headlessCommand === 'attach-workflow') {
+        setPendingAttach(null);
+        setDetachNotice(null);
+        notifyMutationError('Attach failed', mutationFailureBannerMessage(event));
         return;
       }
       notifyMutationError('Mutation failed', event.message);
     });
     return () => { unsubscribe?.(); };
   }, [selectTaskById]);
+
+  useEffect(() => {
+    if (modal.type !== 'approval') return;
+    const liveTask = tasks.get(modal.task.id);
+    if (!liveTask || approvalDialogStillWaiting(liveTask.status)) return;
+    setModal({ type: 'none' });
+  }, [modal, tasks]);
 
   const selectRelativeNode = useCallback((direction: 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight') => {
     const inTaskGraph = keyboardRegion === 'taskGraph';
@@ -2308,6 +2340,10 @@ export function App() {
     const workflow = workflows.get(workflowId);
     const downstreamName = workflow?.name ?? workflowId;
     const upstreamName = workflows.get(upstreamWorkflowId)?.name ?? upstreamWorkflowId;
+    if (workflowDependsOnUpstream(workflow, upstreamWorkflowId)) {
+      notifyMutationError('Attach failed', duplicateAttachMessage(downstreamName, upstreamName));
+      return;
+    }
     const confirmed = window.confirm(
       `Attach "${downstreamName}" to upstream "${upstreamName}"?\n\n` +
       `This adds a dependency so "${downstreamName}" waits on "${upstreamName}"'s merge. ` +
@@ -2315,10 +2351,9 @@ export function App() {
     );
     if (!confirmed) return;
     try {
-      await window.invoker?.attachWorkflow(workflowId, upstreamWorkflowId);
-      setDetachNotice(
-        `Attached "${downstreamName}" to upstream "${upstreamName}". The dependency was added.`,
-      );
+      const options = finishedWorkflowAttachOptions(workflow?.status);
+      await window.invoker?.attachWorkflow(workflowId, upstreamWorkflowId, options);
+      setPendingAttach({ workflowId, upstreamWorkflowId, downstreamName, upstreamName });
       refreshTaskGraph();
     } catch (err) {
       notifyMutationError('Attach Workflow failed:', err);
@@ -2330,6 +2365,15 @@ export function App() {
     const timer = setTimeout(() => setDetachNotice(null), 6000);
     return () => clearTimeout(timer);
   }, [detachNotice]);
+
+  useEffect(() => {
+    if (!pendingAttach) return;
+    if (!workflowDependsOnUpstream(workflows.get(pendingAttach.workflowId), pendingAttach.upstreamWorkflowId)) {
+      return;
+    }
+    setDetachNotice(attachedWorkflowNotice(pendingAttach));
+    setPendingAttach(null);
+  }, [pendingAttach, workflows]);
 
   const handleFix = useCallback(async (taskId: string, agentName: string) => {
     setContextMenu(null);
@@ -3973,8 +4017,10 @@ export function App() {
   }, []);
 
   const openApprovalModal = useCallback((task: TaskState) => {
+    const workflow = task.config.workflowId ? workflows.get(task.config.workflowId) : undefined;
+    if (mergeGateLeavesMergeToGitHub(task, workflow)) return;
     setModal({ type: 'approval', task, action: 'approve' });
-  }, []);
+  }, [workflows]);
 
   const openRejectModal = useCallback((task: TaskState) => {
     setModal({ type: 'approval', task, action: 'reject' });
@@ -5124,9 +5170,7 @@ export function App() {
         downstreamName={
           attachPickerWorkflowId ? (workflows.get(attachPickerWorkflowId)?.name ?? attachPickerWorkflowId) : ''
         }
-        entries={Array.from(workflows.values())
-          .filter((candidate) => candidate.id !== attachPickerWorkflowId)
-          .map((candidate) => ({ id: candidate.id, name: candidate.name }))}
+        entries={attachPickerEntries(workflows.values(), attachPickerWorkflowId)}
         onSelect={(upstreamWorkflowId) => void handleAttachWorkflowSelect(upstreamWorkflowId)}
         onClose={() => setAttachPickerWorkflowId(null)}
       />
@@ -5479,7 +5523,9 @@ export function App() {
           onReject={handleReject}
           onClose={closeModal}
           initialAction={modal.action}
+          decisionError={modal.decisionError}
           onFinish={modal.task.config.workflowId ? workflows.get(modal.task.config.workflowId)?.onFinish : undefined}
+          mergeMode={modal.task.config.workflowId ? workflows.get(modal.task.config.workflowId)?.mergeMode : undefined}
         />
       )}
 

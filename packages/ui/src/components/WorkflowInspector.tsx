@@ -3,6 +3,7 @@ import type { ReviewGateArtifact, ReviewGateQueryResponse, TaskState, WorkflowMe
 import { getEffectiveVisualStatus, getStatusColor } from '../lib/colors.js';
 import { workflowStatusVisual } from '../lib/workflow-status.js';
 import { subscribeVisibilityAwarePoll } from '../hooks/visibilityAwarePoll.js';
+import { githubMergeNotice, mergeGateLeavesMergeToGitHub } from '../lib/merge-gate.js';
 import { mutationFailureTitle } from '../lib/mutation-failure-display.js';
 import { WorkerDecisionsSection } from './WorkerDecisionsSection.js';
 import { FixFailureBanner } from './FixFailureBanner.js';
@@ -466,6 +467,7 @@ export function WorkflowInspector({
   const statusDot = taskColors?.dot ?? '';
   const isFixApproval = Boolean(task?.execution.pendingFixError);
   const isNoMergeGate = Boolean(task?.config.isMergeNode && workflow?.onFinish === 'none');
+  const leavesMergeOnGitHub = Boolean(task && mergeGateLeavesMergeToGitHub(task, workflow));
   const showApprovalActions = Boolean(
     task
     && (task.status === 'awaiting_approval' || task.status === 'review_ready')
@@ -659,18 +661,25 @@ export function WorkflowInspector({
               </div>
             </div>
           )}
+          {showApprovalActions && task && leavesMergeOnGitHub && (
+            <p data-testid="github-merge-notice" className="mt-3 text-xs text-muted-foreground">
+              {githubMergeNotice(task.execution.reviewUrl)}
+            </p>
+          )}
           {showApprovalActions && task && (
             <div className="mt-3 flex gap-2 border-t border-border pt-3">
-              <button
-                type="button"
-                onClick={() => onApprove?.(task)}
-                data-testid="inspector-approve-button"
-                data-sidebar-nav-item
-                data-sidebar-nav-order="15"
-                className="flex-1 rounded bg-green-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-green-500"
-              >
-                {isFixApproval ? 'Approve Fix' : task.config.isMergeNode ? 'Approve Merge' : 'Approve'}
-              </button>
+              {!leavesMergeOnGitHub && (
+                <button
+                  type="button"
+                  onClick={() => onApprove?.(task)}
+                  data-testid="inspector-approve-button"
+                  data-sidebar-nav-item
+                  data-sidebar-nav-order="15"
+                  className="flex-1 rounded bg-green-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-green-500"
+                >
+                  {isFixApproval ? 'Approve Fix' : task.config.isMergeNode ? 'Approve Merge' : 'Approve'}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => onReject?.(task)}

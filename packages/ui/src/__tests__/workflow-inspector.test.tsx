@@ -845,10 +845,33 @@ describe('WorkflowInspector', () => {
     expect(screen.queryByRole('button', { name: 'Reject Merge' })).not.toBeInTheDocument();
   });
 
-  it('keeps merge approval actions for workflows with a configured finish action', () => {
+  it('hides Approve Merge when the pull request is finished on GitHub', () => {
     render(
       <WorkflowInspector
-        workflow={{ ...workflow, status: 'review_ready', onFinish: 'pull_request' }}
+        workflow={{ ...workflow, status: 'review_ready', onFinish: 'pull_request', mergeMode: 'manual' }}
+        task={makeTask({
+          status: 'review_ready',
+          config: { workflowId: 'wf-1', isMergeNode: true, runnerKind: 'merge' },
+          execution: { reviewUrl: 'https://github.com/example/repo/pull/2' },
+        })}
+        collapsed={false}
+        advancedExpanded={false}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        onToggleCollapsed={() => {}}
+        onToggleAdvanced={() => {}}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Approve Merge' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('github-merge-notice')).toHaveTextContent('already open');
+    expect(screen.getByRole('button', { name: 'Reject Merge' })).toBeVisible();
+  });
+
+  it('keeps Approve Merge when Invoker merges the branch itself', () => {
+    render(
+      <WorkflowInspector
+        workflow={{ ...workflow, status: 'review_ready', onFinish: 'merge', mergeMode: 'manual' }}
         task={makeTask({
           status: 'review_ready',
           config: { workflowId: 'wf-1', isMergeNode: true, runnerKind: 'merge' },
@@ -863,7 +886,7 @@ describe('WorkflowInspector', () => {
     );
 
     expect(screen.getByRole('button', { name: 'Approve Merge' })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Reject Merge' })).toBeVisible();
+    expect(screen.queryByTestId('github-merge-notice')).not.toBeInTheDocument();
   });
 
   it('surfaces an executor-selection failure captured in pendingFixError so approve dispatch errors are visible', () => {
