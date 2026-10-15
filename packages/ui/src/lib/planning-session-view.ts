@@ -16,6 +16,7 @@ export type PlanningSessionView = Omit<InAppPlanningSessionSummary, 'messages'> 
   terminalBusy?: boolean;
   terminalError?: string | null;
   repoInput?: string;
+  baseBranchInput?: string;
   repoError?: string | null;
 };
 
@@ -127,6 +128,7 @@ export function reconcileHydratedPlanningSessions(
       terminalBusy: restored.terminalSession ? false : session.terminalBusy,
       terminalError: restored.terminalSession ? null : session.terminalError,
       repoInput: session.repoInput,
+      baseBranchInput: session.baseBranchInput,
       repoError: session.repoError,
     };
   });

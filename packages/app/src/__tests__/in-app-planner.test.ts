@@ -2751,6 +2751,32 @@ describe('rebindPlanningChatRepo', () => {
     expect(stored?.conversation).toBe(originalConversation);
   });
 
+  it('uses a typed base branch instead of config.defaultBranch', async () => {
+    const repoPool = createFakeRebindRepoPool('/fake/worktree/typed-branch', 'sha-typed');
+    const sessions = createInAppPlanningChatSessions();
+    const session = planningSession({
+      id: 'typed-branch-session',
+      title: 'Typed branch',
+      repoUrl: undefined,
+      baseBranch: undefined,
+    });
+    sessions.set(session.id, session);
+
+    const result = await rebindPlanningChatRepo({
+      sessionId: session.id,
+      repoUrl: 'https://example.com/repo.git',
+      baseBranch: 'master',
+    }, {
+      config: { defaultBranch: 'main' },
+      sessions,
+      repoPool,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(repoPool.resolveBaseCommit).toHaveBeenCalledWith('https://example.com/repo.git', 'master');
+    expect(sessions.get(session.id)?.baseBranch).toBe('master');
+  });
+
   it('provisions a new worktree and constructs a fresh conversation when there is no prior binding', async () => {
     const worktreePath = '/fake/worktree/provision-session';
     const repoPool = createFakeRebindRepoPool(worktreePath, 'new-head-sha');

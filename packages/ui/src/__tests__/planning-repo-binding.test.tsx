@@ -282,6 +282,36 @@ describe('planning composer repo binding', () => {
     });
   });
 
+  it('sends the typed base branch and can retry a failed bind', async () => {
+    mock.api.planningChatRebindRepo = vi.fn(async () => ({
+      ok: false as const,
+      error: 'Base branch "main" was not found on the remote origin',
+    }));
+
+    render(<App />);
+    await openComposerOptions();
+
+    fireEvent.change(screen.getByTestId('invoker-terminal-repo'), { target: { value: '/tmp/repo-a' } });
+    fireEvent.change(screen.getByTestId('invoker-terminal-base-branch'), { target: { value: 'master' } });
+    fireEvent.keyDown(screen.getByTestId('invoker-terminal-base-branch'), { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(mock.api.planningChatRebindRepo).toHaveBeenCalledWith({
+        sessionId: 'session-1',
+        repoUrl: '/tmp/repo-a',
+        baseBranch: 'master',
+      });
+    });
+    expect(await screen.findByTestId('invoker-terminal-repo-error')).toHaveTextContent('Base branch "main" was not found');
+    expect(screen.getByTestId('invoker-terminal-repo')).toHaveValue('/tmp/repo-a');
+    expect(screen.getByTestId('invoker-terminal-base-branch')).toHaveValue('master');
+
+    fireEvent.click(screen.getByTestId('invoker-terminal-repo-retry'));
+    await waitFor(() => {
+      expect(mock.api.planningChatRebindRepo).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it('does not send a planning message until a repository is entered', async () => {
     render(<App />);
     await openComposerOptions();

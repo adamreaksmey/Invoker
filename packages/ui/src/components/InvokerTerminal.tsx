@@ -177,6 +177,7 @@ interface InvokerTerminalProps {
   terminalActive?: boolean;
   workflowRunning?: boolean;
   repoValue?: string;
+  baseBranchValue?: string;
   repoLocked?: boolean;
   repoSuggestions?: string[];
   repoError?: string | null;
@@ -188,6 +189,7 @@ interface InvokerTerminalProps {
   onPresetChange: (presetKey: string) => void;
   onConfirmationModeChange: (confirmationMode: PlanningConfirmationMode) => void;
   onRepoInputChange?: (value: string) => void;
+  onBaseBranchInputChange?: (value: string) => void;
   onRepoCommit?: () => void;
   onModeChange?: (mode: PlanningTerminalMode) => void;
   onExpand: () => void;
@@ -770,6 +772,17 @@ function PlanningTmuxPane({ session, busy, error, readOnly = false, terminalActi
   );
 }
 
+const PLANNING_BASE_BRANCH_PLACEHOLDER = 'main, master, …';
+
+function commitComposerFieldOnEnter(
+  event: { key: string; preventDefault: () => void },
+  commit: (() => void) | undefined,
+): void {
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  commit?.();
+}
+
 export function InvokerTerminal({
   lines,
   busy,
@@ -796,6 +809,7 @@ export function InvokerTerminal({
   onValueChange,
   onSubmit,
   repoValue = '',
+  baseBranchValue = '',
   repoLocked = true,
   repoSuggestions = [],
   repoError = null,
@@ -805,6 +819,7 @@ export function InvokerTerminal({
   onPresetChange,
   onConfirmationModeChange,
   onRepoInputChange,
+  onBaseBranchInputChange,
   onRepoCommit,
   onModeChange,
   onExpand,
@@ -1275,33 +1290,57 @@ export function InvokerTerminal({
                 className={`min-h-9 w-full resize-none border-0 bg-transparent py-1 font-sans text-[13.5px] leading-6 text-foreground outline-none placeholder:text-muted-foreground focus:ring-0 ${composerDisabledCursorClass}`}
               />
               <div className="mt-1 flex flex-wrap items-center justify-between gap-3 pt-2">
-                <div>
+                <div className="flex flex-wrap items-center gap-3">
                   {!repoLocked && (
-                    <label className="mr-3 text-xs text-muted-foreground">
-                      Repository
-                      <input
-                        data-testid="invoker-terminal-repo"
-                        list="invoker-terminal-repo-suggestions"
-                        value={repoValue}
-                        disabled={readOnly || binding}
-                        placeholder="path or git URL"
-                        onChange={(event) => onRepoInputChange?.(event.target.value)}
-                        onBlur={() => onRepoCommit?.()}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter') {
-                            event.preventDefault();
-                            onRepoCommit?.();
-                          }
-                        }}
-                        className="ml-2 w-56 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground outline-none hover:border-border-strong focus:border-ring"
-                      />
-                      <datalist id="invoker-terminal-repo-suggestions">
-                        {repoSuggestions.map((repo) => <option key={repo} value={repo} />)}
-                      </datalist>
+                    <>
+                      <label className="text-xs text-muted-foreground">
+                        Repository
+                        <input
+                          data-testid="invoker-terminal-repo"
+                          list="invoker-terminal-repo-suggestions"
+                          value={repoValue}
+                          disabled={readOnly || binding}
+                          placeholder="path or git URL"
+                          onChange={(event) => onRepoInputChange?.(event.target.value)}
+                          onBlur={() => onRepoCommit?.()}
+                          onKeyDown={(event) => commitComposerFieldOnEnter(event, onRepoCommit)}
+                          className="ml-2 w-56 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground outline-none hover:border-border-strong focus:border-ring"
+                        />
+                        <datalist id="invoker-terminal-repo-suggestions">
+                          {repoSuggestions.map((repo) => <option key={repo} value={repo} />)}
+                        </datalist>
+                      </label>
+                      <label className="text-xs text-muted-foreground">
+                        Base branch
+                        <input
+                          data-testid="invoker-terminal-base-branch"
+                          value={baseBranchValue}
+                          disabled={readOnly || binding}
+                          placeholder={PLANNING_BASE_BRANCH_PLACEHOLDER}
+                          onChange={(event) => onBaseBranchInputChange?.(event.target.value)}
+                          onBlur={() => onRepoCommit?.()}
+                          onKeyDown={(event) => commitComposerFieldOnEnter(event, onRepoCommit)}
+                          className="ml-2 w-28 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground outline-none hover:border-border-strong focus:border-ring"
+                        />
+                      </label>
                       {repoMissing && (
-                        <span className="ml-2 text-[11px] text-muted-foreground">Required before planning</span>
+                        <span className="text-[11px] text-muted-foreground">Required before planning</span>
                       )}
-                    </label>
+                      {repoError && (
+                        <span className="basis-full text-xs text-red-400" data-testid="invoker-terminal-repo-error">
+                          {repoError}
+                          <button
+                            type="button"
+                            data-testid="invoker-terminal-repo-retry"
+                            disabled={binding}
+                            onClick={() => onRepoCommit?.()}
+                            className="ml-2 rounded border border-border px-2 py-0.5 text-[11px] text-foreground hover:bg-secondary disabled:opacity-60"
+                          >
+                            Retry
+                          </button>
+                        </span>
+                      )}
+                    </>
                   )}
                   <button
                     type="button"
@@ -1396,9 +1435,6 @@ export function InvokerTerminal({
                           <option value="require">Ask first</option>
                         </select>
                       </label>
-                      {repoError && !repoLocked && (
-                        <span data-testid="invoker-terminal-repo-error" className="text-xs text-red-400">{repoError}</span>
-                      )}
                       {!hasPlanningTools && (
                         <p
                           data-testid="invoker-terminal-planning-tools-empty"

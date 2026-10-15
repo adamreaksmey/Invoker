@@ -2899,6 +2899,14 @@ export function App() {
     }));
   }, [activePlanningSession.id, updatePlanningSessionById]);
 
+  const handlePlanningBaseBranchInputChange = useCallback((value: string) => {
+    updatePlanningSessionById(activePlanningSession.id, (session) => ({
+      ...session,
+      baseBranchInput: value,
+      repoError: null,
+    }));
+  }, [activePlanningSession.id, updatePlanningSessionById]);
+
   const planningRepoCommitInFlightRef = useRef<Promise<{ ok: boolean; sessionId: string | null; error?: string }> | null>(null);
   const [planningRepoBindingId, setPlanningRepoBindingId] = useState<string | null>(null);
 
@@ -2920,8 +2928,11 @@ export function App() {
         || session.mode === 'tmux'
         || session.status === 'submitted'
         || runtimeStatus?.readOnly === true;
-      const pending = (session.repoInput ?? '').trim();
-      if (locked || !pending || pending === (session.repoUrl ?? '')) {
+      const pending = (session.repoInput ?? session.repoUrl ?? '').trim();
+      const pendingBranch = (session.baseBranchInput ?? '').trim();
+      const urlUnchanged = Boolean(session.repoUrl) && pending === session.repoUrl;
+      const branchUnchanged = pendingBranch.length === 0 || pendingBranch === (session.baseBranch ?? '');
+      if (locked || !pending || (urlUnchanged && branchUnchanged)) {
         return { ok: true, sessionId: currentBackendId };
       }
 
@@ -2955,6 +2966,7 @@ export function App() {
                   input: current.input,
                   busy: false,
                   repoInput: current.repoInput,
+                  baseBranchInput: current.baseBranchInput,
                   repoError: null,
                 })
               : current
@@ -2980,13 +2992,18 @@ export function App() {
         return failBind(viewId, sessionId, 'Repo binding is not available.');
       }
       try {
-        const result = await invoker.planningChatRebindRepo({ sessionId, repoUrl: pending });
+        const result = await invoker.planningChatRebindRepo({
+          sessionId,
+          repoUrl: pending,
+          ...(pendingBranch ? { baseBranch: pendingBranch } : {}),
+        });
         if (!result.ok) {
           return failBind(viewId, sessionId, result.error);
         }
         updatePlanningSessionById(viewId, (current) => ({
           ...current,
           repoUrl: pending,
+          baseBranch: pendingBranch || current.baseBranch,
           baseCommit: undefined,
           repoInput: undefined,
           repoError: null,
@@ -4869,6 +4886,7 @@ export function App() {
             workflowRunning={activePlanningWorkflowRunning}
             submittedPlanName={activePlanningSession.submittedPlanName}
             repoValue={activePlanningSession.repoInput ?? activePlanningSession.repoUrl ?? ''}
+            baseBranchValue={activePlanningSession.baseBranchInput ?? ''}
             repoLocked={activePlanningRepoLocked}
             repoSuggestions={planningRepoSuggestions}
             repoError={activePlanningSession.repoError ?? null}
@@ -4885,6 +4903,7 @@ export function App() {
             onPresetChange={handlePlanningPresetChange}
             onConfirmationModeChange={handlePlanningConfirmationModeChange}
             onRepoInputChange={handlePlanningRepoInputChange}
+            onBaseBranchInputChange={handlePlanningBaseBranchInputChange}
             onRepoCommit={() => void commitPlanningRepo()}
             onModeChange={(mode) => void handlePlanningModeChange(mode)}
             onExpand={() => setPlanningTerminalExpanded(true)}

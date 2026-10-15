@@ -776,6 +776,22 @@ export function isDraftingAuthorizedByTurn(message: string, messagesBeforeTurn: 
 
 export const PLANNING_REPO_REQUIRED_ERROR = 'Choose a repository before planning. Invoker will not target a default checkout or an unspecified repo.';
 
+export const PLANNING_BASE_BRANCH_REQUIRED_ERROR = 'Type a base branch. Invoker could not read the remote default branch.';
+
+function resolveRequestedBaseBranch(
+  explicitBranch: string | undefined,
+  repoUrl: string,
+  configuredBranch: string | undefined,
+): string | { error: string } {
+  const typed = explicitBranch?.trim();
+  if (typed) return typed;
+  const remoteDefault = detectDefaultBranchRemote(repoUrl);
+  if (remoteDefault) return remoteDefault;
+  const configured = configuredBranch?.trim();
+  if (configured) return configured;
+  return { error: PLANNING_BASE_BRANCH_REQUIRED_ERROR };
+}
+
 function planConversationConfig(
   preset: HarnessPreset,
   deps: Pick<InAppPlannerDeps, 'config' | 'workingDir' | 'planningCommandBuilder' | 'executionAgentRegistry' | 'conversationRepo' | 'logger' | 'onRawPlannerOutput' | 'planDoctorScriptPath'> & {
@@ -1778,10 +1794,14 @@ export async function rebindPlanningChatRepo(
   if (!requestedRepoUrl) {
     return { ok: false, error: 'No repository specified.' };
   }
-  const requestedBaseBranch = rawRequest?.baseBranch?.trim()
-    || deps.config.defaultBranch?.trim()
-    || detectDefaultBranchRemote(requestedRepoUrl)
-    || 'main';
+  const requestedBaseBranch = resolveRequestedBaseBranch(
+    rawRequest?.baseBranch,
+    requestedRepoUrl,
+    deps.config.defaultBranch,
+  );
+  if (typeof requestedBaseBranch !== 'string') {
+    return { ok: false, error: requestedBaseBranch.error };
+  }
 
   try {
     await repoPool.ensureCloneThroughRepoQueue(requestedRepoUrl);
