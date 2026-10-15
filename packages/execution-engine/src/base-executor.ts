@@ -25,6 +25,12 @@ const DEFAULT_GIT_NETWORK_TIMEOUT_MS = 15 * 60 * 1000;
 const FAILED_TASK_ERROR_TAIL_LINE_LIMIT = 50;
 const FAILED_TASK_ERROR_CHAR_LIMIT = 3000;
 
+export const UNCHANGED_AI_TASK_ERROR = 'The agent finished without changing any files.';
+
+function isUnchangedAiTask(request: WorkRequest, exitCode: number): boolean {
+  return exitCode === 0 && request.actionType === 'ai_task';
+}
+
 const FAILED_TASK_ERROR_LINE_PATTERNS = [
   /^Traceback \(most recent call last\):$/,
   /^\s*(?:error|fatal error):\s+\S/i,
@@ -959,9 +965,9 @@ export abstract class BaseExecutor<TEntry extends BaseEntry> implements Executor
   }
 
   /**
-   * Record the task result as a commit. Calls autoCommit first; if there are
-   * no file changes (common for command tasks), creates an empty commit with
-   * the command/prompt and exit code. Returns the commit hash, or null on failure.
+   * Record the task result as a commit. Calls autoCommit first. Command tasks
+   * with no file changes get an empty commit. An unchanged AI task returns null
+   * so the exit path can fail it instead of reporting success.
    */
   protected async recordTaskResult(
     cwd: string,
@@ -971,13 +977,21 @@ export abstract class BaseExecutor<TEntry extends BaseEntry> implements Executor
     try {
       const hash = await this.autoCommit(cwd, request);
       if (hash) return hash;
-
-      const message = this.buildResultCommitMessage(request, exitCode);
-      await this.execGitSimple(['commit', '--allow-empty', '-m', message], cwd);
-      return (await this.execGitSimple(['rev-parse', 'HEAD'], cwd)).trim();
+      if (isUnchangedAiTask(request, exitCode)) return null;
+      return await this.commitEmptyTaskResult(cwd, request, exitCode);
     } catch {
       return null;
     }
+  }
+
+  private async commitEmptyTaskResult(
+    cwd: string,
+    request: WorkRequest,
+    exitCode: number,
+  ): Promise<string> {
+    const message = this.buildResultCommitMessage(request, exitCode);
+    await this.execGitSimple(['commit', '--allow-empty', '-m', message], cwd);
+    return (await this.execGitSimple(['rev-parse', 'HEAD'], cwd)).trim();
   }
 
   /**
@@ -1354,6 +1368,11 @@ export abstract class BaseExecutor<TEntry extends BaseEntry> implements Executor
       recordError = `[${this.type}] recordTaskResult error: ${err}`;
       this.emitOutput(executionId, `${recordError}\n`);
       if (effectiveExitCode === 0) status = 'failed';
+    }
+    if (isUnchangedAiTask(request, effectiveExitCode) && !commitHash) {
+      status = 'failed';
+      recordError = UNCHANGED_AI_TASK_ERROR;
+      this.emitOutput(executionId, `[${this.type}] ${UNCHANGED_AI_TASK_ERROR}\n`);
     }
 
     let pushError: string | undefined;

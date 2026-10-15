@@ -49,6 +49,21 @@ describe('parsePlanningDraftTaskDescription', () => {
     );
   });
 
+  it('keeps a layer exception out of the layer pill value', () => {
+    const raw = [
+      'Review claim: The terminal check reports leaked handoff artifacts without changing repository state.',
+      'Layer: e2e_regression',
+      'Layer exception: allowed — this repository hygiene check is the required terminal gate after the UI implementation, and it makes no product-layer changes.',
+      'Feature state: active',
+    ].join('\n');
+
+    const view = parsePlanningDraftTaskDescription(raw);
+
+    expect(view.fields.find((field) => field.label === 'Layer')?.value).toBe('e2e_regression');
+    expect(view.fields.find((field) => field.label === 'Layer exception')?.value).toContain('allowed');
+    expect(view.fields.find((field) => field.label === 'Feature state')?.value).toBe('active');
+  });
+
   it('passes through unlabeled text without structured fields', () => {
     const raw = 'Verify contracts';
     const view = parsePlanningDraftTaskDescription(raw);

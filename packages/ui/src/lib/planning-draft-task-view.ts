@@ -1,5 +1,6 @@
 export const PLANNING_DRAFT_FIELD_LABELS = [
   'Layer',
+  'Layer exception',
   'Feature state',
   'Review claim',
   'Review lane',

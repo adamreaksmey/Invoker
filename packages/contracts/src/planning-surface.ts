@@ -27,8 +27,9 @@ export function planningHostContext(surface: PlanningHostSurface): string {
     return [
       'Current planning host: Invoker in-app planner.',
       '- Never direct the user to Slack or claim that a Slack review card exists.',
-      '- When you write valid YAML, the in-app host stages that exact draft in its review panel.',
-      '- Writing YAML does not submit or execute it; the user must approve the staged draft.',
+      '- The host stages a reviewable draft only from the plan-draft file, or when the user explicitly asks for a plan.',
+      '- YAML that only appears in the chat reply is not a saved draft. Do not tell the user a draft is ready unless one was staged.',
+      '- A staged draft is not submitted or executed until the user approves it.',
     ].join('\n');
   }
 

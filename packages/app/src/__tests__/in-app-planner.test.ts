@@ -16,6 +16,7 @@ vi.mock('../system-diagnostics.js', async (importOriginal) => {
 import {
   PLANNING_TERMINAL_SUMMARY_BRIDGE_START,
   PLANNING_TURN_CANCELLED_MESSAGE,
+  UNSAVED_PLANNING_DRAFT_NOTICE,
   buildPlanningTerminalSummaryBridge,
   cancelPlanningChatTurn,
   createInAppPlanningChatSessions,
@@ -743,10 +744,11 @@ describe('planning chat', () => {
 
     expect(result).toMatchObject({
       ok: true,
-      reply: REDACTED_VALID_PLAN_REPLY,
+      reply: `${REDACTED_VALID_PLAN_REPLY}\n\n${UNSAVED_PLANNING_DRAFT_NOTICE}`,
       draftPlanAvailable: false,
     });
     if (!result.ok) throw new Error(result.error);
+    expect(sessions.get(result.sessionId)?.messages.at(-1)?.text).toContain(UNSAVED_PLANNING_DRAFT_NOTICE);
     expect(sessions.get(result.sessionId)?.status).toBe('still_discussing');
     expect(sessions.get(result.sessionId)?.draftPlanText).toBeUndefined();
 

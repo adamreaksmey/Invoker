@@ -148,4 +148,32 @@ describe('TaskDAG status filters', () => {
     expect(summary).toHaveTextContent('Artifacts stay out of the repo');
     expect(summary).toHaveTextContent('Check the completed handoff for ephemeral inter-task artifacts.');
   });
+
+  it('does not show a layer exception on a completed task card', async () => {
+    const exception = 'allowed — this repository hygiene check is the required terminal gate after the UI implementation, and it makes no product-layer changes.';
+    const description = [
+      'Review claim: The terminal check reports leaked handoff artifacts without changing repository state.',
+      'Layer: e2e_regression',
+      `Layer exception: ${exception}`,
+      'Feature state: active',
+    ].join('\n');
+    const task = makeUITask({
+      id: 'wf-1/scrub-handoff-artifacts',
+      workflowId: 'wf-1',
+      status: 'completed',
+      description,
+    });
+    const tasks = new Map<string, TaskState>([[task.id, task]]);
+    const workflows = new Map<string, WorkflowMeta>([
+      ['wf-1', { id: 'wf-1', name: 'Vue todo', status: 'completed' }],
+    ]);
+
+    render(<TaskDAG tasks={tasks} workflows={workflows} />);
+
+    const node = await screen.findByTestId(`rf__node-${task.id}`);
+    expect(node).toHaveTextContent('e2e_regression');
+    expect(node).toHaveTextContent('Completed');
+    expect(node).not.toHaveTextContent('Layer exception');
+    expect(node).not.toHaveTextContent('required terminal gate');
+  });
 });

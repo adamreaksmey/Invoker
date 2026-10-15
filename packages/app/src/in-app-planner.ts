@@ -180,6 +180,12 @@ export function createInAppPlanningChatSessions(): InAppPlanningChatSessions {
 
 export const PLANNING_TURN_CANCELLED_MESSAGE = 'Cancelled.';
 
+export const UNSAVED_PLANNING_DRAFT_NOTICE = 'Invoker did not save this as a reviewable draft. Ask for a new plan when you want it staged.';
+
+function replyWithUnsavedDraftNotice(reply: string): string {
+  return `${reply}\n\n${UNSAVED_PLANNING_DRAFT_NOTICE}`;
+}
+
 function isTurnAlreadyMarkedCancelled(
   status: InAppPlanningTurnStatus | undefined,
   error: string | undefined,
@@ -1421,20 +1427,21 @@ export async function sendPlanningChatMessage(
           && !result.draftingAuthorized
           && !sidecarDraftApproved;
         if (result.kind === 'message' || unauthorizedDraft) {
+          const storedReply = unauthorizedDraft ? replyWithUnsavedDraftNotice(reply) : reply;
           const conversationStatus = result.kind === 'message'
             ? result.status
-            : reply.includes('?')
+            : storedReply.includes('?')
               ? 'waiting_for_answer'
               : 'still_discussing';
           activeSession.status = hasDraftPlan(activeSession)
             ? 'draft_ready'
             : conversationStatus;
-          appendSessionMessage(activeSession, 'assistant', reply);
+          appendSessionMessage(activeSession, 'assistant', storedReply);
           return finishTurn({
             ok: true,
             sessionId: activeSession.id,
             turnId,
-            reply,
+            reply: storedReply,
             reasoning,
             confirmationMode: activeSession.confirmationMode,
             draftPlanAvailable: hasDraftPlan(activeSession),
