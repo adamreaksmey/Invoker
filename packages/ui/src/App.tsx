@@ -925,9 +925,21 @@ export function App() {
       });
       const reconciledSessions = reconcileHydratedPlanningSessions(planningSessionsRef.current, admissibleRestored);
       const nextSessions = chatList.sessions.length === 0
-        ? reconciledSessions.map((session) => (session.id.startsWith('local-')
-          ? { ...session, repoUrl: repoBinding?.repoUrl, baseBranch: repoBinding?.baseBranch }
-          : session))
+        ? reconciledSessions.map((session) => {
+          if (!session.id.startsWith('local-') || session.repoUrl) return session;
+          if (!repoBinding?.repoUrl) {
+            return {
+              ...session,
+              repoInput: undefined,
+              baseBranchInput: undefined,
+            };
+          }
+          return {
+            ...session,
+            repoInput: session.repoInput ?? repoBinding.repoUrl,
+            baseBranchInput: session.baseBranchInput ?? repoBinding.baseBranch,
+          };
+        })
         : reconciledSessions;
       planningSessionsRef.current = nextSessions;
       setPlanningSessions(nextSessions);
@@ -3392,17 +3404,17 @@ export function App() {
   }, [clearPlanningStreamForSessionIds, forgetPlanningStreamAliasesForSessionIds, makeFreshLocalPlanningSession]);
 
   const handleDeletePlanningSession = useCallback((sessionId: string) => {
-    if (activePlanningReadOnly) {
+    if (planningWindowReadOnly) {
       return;
     }
     if (!sessionId.startsWith('local-')) {
       void invoker?.planningChatDelete?.({ sessionId });
     }
     removePlanningSessionsById([sessionId]);
-  }, [activePlanningReadOnly, invoker, removePlanningSessionsById]);
+  }, [planningWindowReadOnly, invoker, removePlanningSessionsById]);
 
   const handleClearSubmittedPlanningSessions = useCallback(() => {
-    if (activePlanningReadOnly) {
+    if (planningWindowReadOnly) {
       return;
     }
     const confirmed = window.confirm('Clear all submitted planning chats? This cannot be undone.');
@@ -3413,7 +3425,7 @@ export function App() {
     if (submittedIds.length === 0) return;
     void invoker?.planningChatDeleteSubmitted?.();
     removePlanningSessionsById(submittedIds);
-  }, [activePlanningReadOnly, invoker, removePlanningSessionsById]);
+  }, [planningWindowReadOnly, invoker, removePlanningSessionsById]);
 
   const handlePlanningModeChange = useCallback(async (mode: PlanningTerminalMode) => {
     const sourceSession = activePlanningSession;
@@ -4728,7 +4740,7 @@ export function App() {
                   </div>
                 </div>
               </button>
-              {!activePlanningReadOnly && (
+              {!planningWindowReadOnly && (
                 <button
                   type="button"
                   aria-label="Delete planning chat"
@@ -4909,7 +4921,7 @@ export function App() {
                   variant="outline"
                   size="sm"
                   onClick={handleClearSubmittedPlanningSessions}
-                  disabled={activePlanningReadOnly || submittedPlanningSessionCount === 0}
+                  disabled={planningWindowReadOnly || submittedPlanningSessionCount === 0}
                 >
                   Clear submitted
                 </Button>

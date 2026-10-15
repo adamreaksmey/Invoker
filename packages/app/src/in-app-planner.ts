@@ -1837,7 +1837,12 @@ export async function rebindPlanningChatRepo(
   try {
     await repoPool.ensureCloneThroughRepoQueue(requestedRepoUrl);
     cloneFinished = true;
-    const requestedHeadSha = await repoPool.resolveBaseCommit(requestedRepoUrl, requestedBaseBranch);
+    const requestedHeadSha = await repoPool.resolveBaseCommit(
+      requestedRepoUrl,
+      requestedBaseBranch,
+      undefined,
+      { allowMainMasterAlternate: false },
+    );
 
     const decision = decideWorktreeBinding({
       storedRepoUrl: session.repoUrl,

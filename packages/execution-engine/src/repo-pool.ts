@@ -18,7 +18,12 @@ import {
   parseGitWorktreePorcelain,
   parseExperimentBranch,
 } from './worktree-discovery.js';
-import { syncPlanBaseRemoteForRef, isInvokerManagedPoolBranch, resolvePlanBaseRevision } from './plan-base-remote.js';
+import {
+  syncPlanBaseRemoteForRef,
+  isInvokerManagedPoolBranch,
+  resolvePlanBaseRevision,
+  type ResolvePlanBaseRevisionOptions,
+} from './plan-base-remote.js';
 import { remoteFetchForPool } from './remote-fetch-policy.js';
 import { isWorkspaceCleanupEnabled } from './workspace-cleanup-policy.js';
 import { computeRepoCacheHash, computeRepoCacheKey, sanitizeBranchForPath } from './git-utils.js';
@@ -343,7 +348,12 @@ export class RepoPool {
     return undefined;
   }
 
-  async resolveBaseCommit(repoUrl: string, baseBranch: string, timing?: RepoPoolTiming): Promise<string> {
+  async resolveBaseCommit(
+    repoUrl: string,
+    baseBranch: string,
+    timing?: RepoPoolTiming,
+    options?: ResolvePlanBaseRevisionOptions,
+  ): Promise<string> {
     const batch = this.pendingRebaseRefreshBatches.get(this.repoKey(repoUrl));
     const batchedCommit = batch?.resolvedBaseCommits.get(baseBranch);
     if (batchedCommit) {
@@ -356,7 +366,7 @@ export class RepoPool {
     const dir = this.cloneDir(repoUrl);
     const runGit = (args: string[]) => this.execGit(args, dir);
     return this.time(timing, 'RepoPool.resolveBaseCommit.resolvePlanBaseRevision', { dir, baseBranch }, () =>
-      resolvePlanBaseRevision(runGit, baseBranch),
+      resolvePlanBaseRevision(runGit, baseBranch, options),
     );
   }
 

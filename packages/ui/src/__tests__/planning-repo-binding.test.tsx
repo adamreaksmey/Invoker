@@ -21,6 +21,10 @@ describe('planning composer repo binding', () => {
     mock.cleanup();
   });
 
+  function checkPlanningRepo(): void {
+    fireEvent.click(screen.getByTestId('invoker-terminal-repo-check'));
+  }
+
   async function openComposerOptions() {
     fireEvent.click(await screen.findByTestId('sidebar-home'));
     const expandPlanningChats = screen.queryByRole('button', { name: 'Expand planning chats' });
@@ -39,7 +43,7 @@ describe('planning composer repo binding', () => {
 
     const repoInput = screen.getByTestId('invoker-terminal-repo');
     fireEvent.change(repoInput, { target: { value: '/tmp/repo-a' } });
-    fireEvent.keyDown(repoInput, { key: 'Enter' });
+    checkPlanningRepo();
 
     await waitFor(() => {
       expect(mock.api.planningChatCreate).toHaveBeenCalledWith({
@@ -71,7 +75,7 @@ describe('planning composer repo binding', () => {
 
     const repoInput = screen.getByTestId('invoker-terminal-repo');
     fireEvent.change(repoInput, { target: { value: '/tmp/repo-a' } });
-    fireEvent.keyDown(repoInput, { key: 'Enter' });
+    checkPlanningRepo();
     await screen.findByTestId('invoker-terminal-repo-edit');
 
     fireEvent.click(screen.getByTestId('invoker-terminal-repo-edit'));
@@ -103,7 +107,7 @@ describe('planning composer repo binding', () => {
 
     const repoInput = screen.getByTestId('invoker-terminal-repo');
     fireEvent.change(repoInput, { target: { value: '/tmp/repo-b' } });
-    fireEvent.keyDown(repoInput, { key: 'Enter' });
+    checkPlanningRepo();
 
     await waitFor(() => {
       expect(screen.getByTestId('invoker-terminal-repo-error')).toHaveTextContent(
@@ -148,8 +152,6 @@ describe('planning composer repo binding', () => {
     fireEvent.change(repoInput, { target: { value: '/tmp/repo-a' } });
     fireEvent.change(screen.getByTestId('invoker-terminal-input'), { target: { value: 'hello planner' } });
 
-    // Clicking the Send button first blurs the repo field, then submits the form.
-    fireEvent.blur(repoInput);
     fireEvent.submit(screen.getByTestId('invoker-terminal-input').closest('form')!);
 
     await waitFor(() => {
@@ -202,7 +204,7 @@ describe('planning composer repo binding', () => {
     });
   });
 
-  it('shows the send spinner during a blur-committed bind without sending', async () => {
+  it('shows the send spinner during a Check-committed bind without sending', async () => {
     let resolveRebind!: (value: { ok: true; action: 'provision'; baseBranch: string }) => void;
     mock.api.planningChatRebindRepo = vi.fn(() => new Promise<{ ok: true; action: 'provision'; baseBranch: string }>((resolve) => {
       resolveRebind = resolve;
@@ -211,9 +213,8 @@ describe('planning composer repo binding', () => {
     render(<App />);
     await openComposerOptions();
 
-    const repoInput = screen.getByTestId('invoker-terminal-repo');
-    fireEvent.change(repoInput, { target: { value: '/tmp/repo-a' } });
-    fireEvent.blur(repoInput);
+    fireEvent.change(screen.getByTestId('invoker-terminal-repo'), { target: { value: '/tmp/repo-a' } });
+    checkPlanningRepo();
 
     await waitFor(() => {
       expect(screen.getByTestId('invoker-terminal-send-spinner')).toBeInTheDocument();
@@ -239,7 +240,6 @@ describe('planning composer repo binding', () => {
     fireEvent.change(repoInput, { target: { value: '/tmp/repo-a' } });
     fireEvent.change(screen.getByTestId('invoker-terminal-input'), { target: { value: 'hello planner' } });
 
-    fireEvent.blur(repoInput);
     fireEvent.submit(screen.getByTestId('invoker-terminal-input').closest('form')!);
 
     const errorLines = await screen.findAllByText('Could not bind repository: boom');
@@ -280,11 +280,7 @@ describe('planning composer repo binding', () => {
     expect(screen.getByTestId('invoker-terminal-repo-edit')).toBeInTheDocument();
   });
 
-  it('clears the local placeholder repo binding when a later refresh reports no server binding', async () => {
-    // Mount fires two independent hydrate calls before this test's own
-    // interaction (a legacy startup hydrate, which no-ops on an empty
-    // session list, and refreshPlanningSessionsNow's own mount effect,
-    // which is the one that binds the local placeholder's repo).
+  it('keeps an explicitly checked repository after a failed send refresh', async () => {
     let listCallCount = 0;
     mock.api.planningChatList = vi.fn(async () => {
       listCallCount += 1;
@@ -304,8 +300,10 @@ describe('planning composer repo binding', () => {
     });
 
     await openComposerOptions();
-    fireEvent.click(screen.getByTestId('planning-context-toggle'));
-    expect(await screen.findByTestId('planning-repo-status')).toHaveTextContent('tmp/repo-a');
+    checkPlanningRepo();
+    await waitFor(() => {
+      expect(screen.getByTestId('invoker-terminal-clone-status')).toHaveTextContent('Cloned tmp/repo-a on main.');
+    });
 
     fireEvent.change(screen.getByTestId('invoker-terminal-input'), { target: { value: 'hello planner' } });
     fireEvent.submit(screen.getByTestId('invoker-terminal-input').closest('form')!);
@@ -313,9 +311,8 @@ describe('planning composer repo binding', () => {
     await waitFor(() => {
       expect(listCallCount).toBe(3);
     });
-    await waitFor(() => {
-      expect(screen.getByTestId('planning-repo-status')).toHaveTextContent('No repository bound yet');
-    });
+    fireEvent.click(screen.getByTestId('planning-context-toggle'));
+    expect(await screen.findByTestId('planning-repo-status')).toHaveTextContent('tmp/repo-a');
   });
 
   it('sends the typed base branch and can retry a failed bind', async () => {
@@ -329,7 +326,7 @@ describe('planning composer repo binding', () => {
 
     fireEvent.change(screen.getByTestId('invoker-terminal-repo'), { target: { value: '/tmp/repo-a' } });
     fireEvent.change(screen.getByTestId('invoker-terminal-base-branch'), { target: { value: 'master' } });
-    fireEvent.keyDown(screen.getByTestId('invoker-terminal-base-branch'), { key: 'Enter' });
+    checkPlanningRepo();
 
     await waitFor(() => {
       expect(mock.api.planningChatRebindRepo).toHaveBeenCalledWith({
@@ -346,6 +343,19 @@ describe('planning composer repo binding', () => {
     await waitFor(() => {
       expect(mock.api.planningChatRebindRepo).toHaveBeenCalledTimes(2);
     });
+  });
+
+  it('does not bind the repository on blur before Check is clicked', async () => {
+    render(<App />);
+    await openComposerOptions();
+
+    const repoInput = screen.getByTestId('invoker-terminal-repo');
+    fireEvent.change(repoInput, { target: { value: '/tmp/repo-a' } });
+    fireEvent.blur(repoInput);
+
+    expect(mock.api.planningChatCreate).not.toHaveBeenCalled();
+    expect(mock.api.planningChatRebindRepo).not.toHaveBeenCalled();
+    expect(screen.getByTestId('invoker-terminal-repo-check')).toBeInTheDocument();
   });
 
   it('does not send a planning message until a repository is entered', async () => {

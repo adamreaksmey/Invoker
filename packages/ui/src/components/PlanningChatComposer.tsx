@@ -13,6 +13,7 @@ const REPO_SUGGESTIONS_ID = 'invoker-terminal-repo-suggestions';
 const REPO_REQUIRED_MESSAGE = 'Required before planning';
 const REPO_EDIT_LABEL = 'Edit';
 const REPO_DONE_LABEL = 'Done';
+const REPO_CHECK_LABEL = 'Check';
 const REPO_ACTION_BUTTON_CLASS = 'inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background px-2.5 text-xs text-foreground hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50';
 const HARNESS_EMPTY_LABEL = 'None';
 const MODEL_EMPTY_LABEL = 'Default';
@@ -134,6 +135,7 @@ interface ComposerTextFieldProps {
   fieldClassName: string;
   listId?: string;
   suggestions?: string[];
+  commitOnBlur: boolean;
   onValueChange: (value: string) => void;
   onCommit?: () => void;
 }
@@ -159,8 +161,12 @@ function ComposerTextField(props: ComposerTextFieldProps): JSX.Element {
         disabled={props.disabled}
         placeholder={props.placeholder}
         onChange={(event) => props.onValueChange(event.target.value)}
-        onBlur={() => props.onCommit?.()}
-        onKeyDown={(event) => commitFieldOnEnter(event, props.onCommit)}
+        onBlur={() => {
+          if (props.commitOnBlur) props.onCommit?.();
+        }}
+        onKeyDown={(event) => {
+          if (props.onCommit) commitFieldOnEnter(event, props.onCommit);
+        }}
         className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
       />
       <FieldSuggestions listId={props.listId} suggestions={props.suggestions} />
@@ -174,6 +180,7 @@ function repoFieldsDisabled(composer: PlanningChatComposerProps): boolean {
 }
 
 function RepoField({ composer }: { composer: PlanningChatComposerProps }): JSX.Element {
+  const commitOnBlur = composer.repoBound && composer.repoEditing;
   return (
     <ComposerTextField
       icon={<RepositoryIcon className={FIELD_ICON_CLASS} />}
@@ -185,13 +192,15 @@ function RepoField({ composer }: { composer: PlanningChatComposerProps }): JSX.E
       listId={REPO_SUGGESTIONS_ID}
       suggestions={composer.repoSuggestions}
       fieldClassName={fieldClass('flex-[1.35]')}
+      commitOnBlur={commitOnBlur}
       onValueChange={(next) => composer.onRepoInputChange?.(next)}
-      onCommit={composer.onRepoCommit}
+      onCommit={composer.repoBound && composer.repoEditing ? composer.onRepoCommit : undefined}
     />
   );
 }
 
 function BaseBranchField({ composer }: { composer: PlanningChatComposerProps }): JSX.Element {
+  const commitOnBlur = composer.repoBound && composer.repoEditing;
   return (
     <ComposerTextField
       icon={<GitBranchIcon className={FIELD_ICON_CLASS} />}
@@ -201,8 +210,9 @@ function BaseBranchField({ composer }: { composer: PlanningChatComposerProps }):
       disabled={repoFieldsDisabled(composer)}
       testId="invoker-terminal-base-branch"
       fieldClassName={fieldClass('flex-1')}
+      commitOnBlur={commitOnBlur}
       onValueChange={(next) => composer.onBaseBranchInputChange?.(next)}
-      onCommit={composer.onRepoCommit}
+      onCommit={composer.repoBound && composer.repoEditing ? composer.onRepoCommit : undefined}
     />
   );
 }
@@ -260,7 +270,19 @@ function ComposerRepoNotices({ composer }: { composer: PlanningChatComposerProps
 }
 
 function RepoEditButton({ composer }: { composer: PlanningChatComposerProps }): JSX.Element | null {
-  if (!composer.repoBound || composer.readOnly || composer.repositoryLocked || composer.binding) return null;
+  if (composer.readOnly || composer.repositoryLocked || composer.binding) return null;
+  if (!composer.repoBound) {
+    return (
+      <button
+        type="button"
+        data-testid="invoker-terminal-repo-check"
+        onClick={() => composer.onRepoCommit?.()}
+        className={REPO_ACTION_BUTTON_CLASS}
+      >
+        {REPO_CHECK_LABEL}
+      </button>
+    );
+  }
   if (composer.repoEditing) {
     return (
       <button

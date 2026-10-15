@@ -1825,6 +1825,26 @@ describe('Invoker terminal (component)', () => {
     expect(mock.api.planningChatDelete).toHaveBeenCalledWith({ sessionId: 'only-saved-chat' });
   });
 
+  it('keeps planning chat delete controls visible when the active session is submitted', async () => {
+    mock.api.planningChatList = vi.fn(async () => ({
+      ok: true,
+      sessions: [
+        makeRailPlanningSession('draft-chat', 'Draft chat'),
+        makeRailPlanningSession('submitted-chat', 'Submitted chat', 'submitted'),
+      ],
+    }));
+
+    render(<App />);
+    await openPlanningTerminal();
+
+    await waitFor(() => expect(getPlanningSessionRowByText('Submitted chat')).toBeInTheDocument());
+    const submittedRow = getPlanningSessionRowByText('Submitted chat');
+    fireEvent.click(within(submittedRow).getAllByRole('button')[0]!);
+
+    expect(screen.getAllByRole('button', { name: 'Delete planning chat' })).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Clear submitted' })).toBeEnabled();
+  });
+
   it('hides planning chat trash buttons and disables Clear submitted in read-only mode', async () => {
     mock.setRuntimeStatus({
       ownerMode: false,
