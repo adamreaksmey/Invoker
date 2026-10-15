@@ -2204,7 +2204,7 @@ describe('Invoker terminal (component)', () => {
     expect(mock.api.start).not.toHaveBeenCalled();
   });
 
-  it('marks a submitted planning session read-only', async () => {
+  it('keeps the composer open after a plan is submitted', async () => {
     mock.api.planningChatSend = vi.fn(async () => ({
       ok: true,
       sessionId: 'session-1',
@@ -2224,9 +2224,9 @@ describe('Invoker terminal (component)', () => {
     fireEvent.click(screen.getByTestId('sidebar-home'));
 
     const input = screen.getByTestId('invoker-terminal-input');
-    expect(input).toBeDisabled();
-    expect(input).toHaveClass('disabled:cursor-not-allowed');
-    expect(input).not.toHaveClass('disabled:cursor-wait');
+    expect(input).toBeEnabled();
+    expect(input).toHaveAttribute('placeholder', 'Describe a follow-up change for this project');
+    expect(screen.getByTestId('invoker-terminal-submitted-bar')).toBeInTheDocument();
     expect(screen.getAllByText(/submitted/i).length).toBeGreaterThan(0);
   });
 

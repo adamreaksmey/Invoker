@@ -385,7 +385,7 @@ function planningNextActionLine(session: InAppPlanningChatSession): string {
     case 'draft_ready':
       return 'Next: Review or submit the draft in chat; use this shell for manual context checks.';
     case 'submitted':
-      return 'Next: Review the submitted workflow in Invoker; submitted planning sessions stay read-only.';
+      return 'Next: Review the submitted workflow, or keep chatting to plan a follow-up change on this project.';
     case 'planner_error':
       return 'Next: Re-authenticate or fix the error, then retry the last message.';
   }
@@ -484,6 +484,18 @@ function extractPlanningConfirmationOverride(message: string): {
     message: message.slice(match[0].length),
     confirmationMode: 'auto_submit',
   };
+}
+
+const FOLLOW_UP_CHAT_MESSAGE = 'This chat is open again for follow-up changes on the same project. The submitted plan stays on the graph.';
+
+function reopenSubmittedPlanningSession(session: InAppPlanningChatSession): void {
+  session.status = 'still_discussing';
+  session.draftPlanSummary = undefined;
+  session.draftPlanText = undefined;
+  session.planningDraftId = undefined;
+  session.planningDraftHash = undefined;
+  session.conversation.discardApprovedPlanningDraft();
+  appendSessionMessage(session, 'system', FOLLOW_UP_CHAT_MESSAGE, 'muted');
 }
 
 function appendSessionMessage(
@@ -1271,9 +1283,6 @@ export async function sendPlanningChatMessage(
       session = created;
       sessionId = session.id;
     }
-    if (session.status === 'submitted') {
-      return { ok: false, sessionId: session.id, turnId, error: 'This planning session was already submitted. Start a new planning chat for changes.' };
-    }
     if (session.activeTurnStatus === 'running' && session.activeTurnId === turnId) {
       return { ok: false, sessionId: session.id, turnId, error: 'duplicate-turn' };
     }
@@ -1309,6 +1318,9 @@ export async function sendPlanningChatMessage(
     activeSession.confirmationMode = requestedConfirmationMode;
     const previousSend = activeSession.pendingSend ?? Promise.resolve();
     const turn = previousSend.then(async (): Promise<InAppPlanningChatResponse> => {
+      if (!isRetry && activeSession.status === 'submitted') {
+        reopenSubmittedPlanningSession(activeSession);
+      }
       clearStarterPromptIfUnused(activeSession);
       const messagesBeforeTurn: PlanningMessage[] = activeSession.messages.map((entry) => ({
         role: entry.role,

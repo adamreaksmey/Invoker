@@ -105,8 +105,8 @@ describe('planning draft submit -> new turn live planner stream repro', () => {
       expect(mock.api.planningChatSubmit).toHaveBeenCalledWith({ sessionId: 'session-1' });
     });
     expect(await screen.findByText('Plan "Mock Plan" submitted to Invoker. Review the graph, then Start ready work.')).toBeInTheDocument();
-    expect(screen.getByTestId('invoker-terminal-input')).toBeDisabled();
-    expect(screen.getByTestId('invoker-terminal-harness')).toBeDisabled();
+    expect(screen.getByTestId('invoker-terminal-input')).toBeEnabled();
+    expect(screen.getByTestId('invoker-terminal-harness')).toBeEnabled();
 
     fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
     await waitFor(() => {

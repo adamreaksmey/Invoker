@@ -10,6 +10,7 @@ import type { TaskStatus } from '../types.js';
 import { getStatusColor, getEffectiveVisualStatus } from '../lib/colors.js';
 import type { MergeGateKind } from '../lib/merge-gate.js';
 import { GitMergeIcon, GitPullRequestIcon } from './icons/index.js';
+import { TASK_GRAPH_NODE_WIDTH } from '../lib/task-graph-metrics.js';
 
 interface MergeGateNodeData {
   taskId?: string;
@@ -73,7 +74,8 @@ export function MergeGateNode({ data }: MergeGateNodeProps) {
 
   return (
     <div
-      className={`relative w-[167px] rounded-xl border border-dashed px-2 py-2 transition-[opacity,box-shadow,border-color] duration-75 shadow-sm ${colors.bg} ${colors.border} ${selected ? 'ring-1 ring-ring/60 shadow-md' : ''} ${dimmed ? 'opacity-20 pointer-events-none' : ''}`}
+      className={`relative rounded-xl border border-dashed px-2 py-2 transition-[opacity,box-shadow,border-color] duration-75 shadow-sm ${colors.bg} ${colors.border} ${selected ? 'ring-1 ring-ring/60 shadow-md' : ''} ${dimmed ? 'opacity-20 pointer-events-none' : ''}`}
+      style={{ width: TASK_GRAPH_NODE_WIDTH }}
       title={label}
       data-selected={selected ? 'true' : 'false'}
     >
@@ -94,7 +96,7 @@ export function MergeGateNode({ data }: MergeGateNodeProps) {
         </span>
       </div>
 
-      <div className={`text-[11px] font-medium truncate mt-0.5 pl-2 text-card-foreground`}>
+      <div className="mt-0.5 line-clamp-3 pl-2 text-[12px] font-medium leading-4 text-card-foreground">
         {label}
       </div>
 

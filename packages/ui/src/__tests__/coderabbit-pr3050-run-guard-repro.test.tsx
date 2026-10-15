@@ -61,7 +61,7 @@ describe('CodeRabbit PR #3050 — submitted planning stays read-only after start
     });
 
     await screen.findByText('Plan "Mock Plan" submitted to Invoker. Review the graph, then Start ready work.');
-    expect(screen.getByTestId('invoker-terminal-input')).toBeDisabled();
+    expect(screen.getByTestId('invoker-terminal-input')).toBeEnabled();
     expect(mock.api.startReady).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByTestId('sidebar-planning'));
@@ -73,8 +73,8 @@ describe('CodeRabbit PR #3050 — submitted planning stays read-only after start
     expect(screen.queryByTestId('rail-stop')).not.toBeInTheDocument();
 
     await openPlanningTerminal();
-    expect(screen.getByTestId('invoker-terminal-input')).toBeDisabled();
-    expect(screen.getByTestId('invoker-terminal-harness')).toBeDisabled();
+    expect(screen.getByTestId('invoker-terminal-input')).toBeEnabled();
+    expect(screen.getByTestId('invoker-terminal-harness')).toBeEnabled();
     expect(mock.api.start).not.toHaveBeenCalled();
   });
 });

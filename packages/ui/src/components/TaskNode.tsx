@@ -1,18 +1,13 @@
 /**
  * TaskNode — Custom node component for the DAG visualization.
  *
- * Renders a task card with:
- * - Truncated ID
- * - Description
- * - Status indicator dot with color and heartbeat liveness
- * - Status label
- *
  * Used as a custom node type in @xyflow/react.
  */
 
 import { Handle, Position } from '@xyflow/react';
 import type { TaskState } from '../types.js';
 import { getStatusColor, getEffectiveVisualStatus } from '../lib/colors.js';
+import { TASK_GRAPH_NODE_WIDTH } from '../lib/task-graph-metrics.js';
 
 interface TaskNodeData {
   task: TaskState;
@@ -75,8 +70,9 @@ export function TaskNode({ data }: TaskNodeProps) {
 
   return (
     <div
-      className={`relative w-[167px] overflow-hidden rounded-xl border px-2 py-2 transition-[opacity,box-shadow,border-color] duration-150 shadow-sm ${colors.bg} ${colors.border} ${selected ? 'ring-1 ring-ring/60 shadow-md' : ''} ${opacityClass} ${interactionClass}`}
-      title={task.id}
+      className={`relative overflow-hidden rounded-xl border px-2 py-2 transition-[opacity,box-shadow,border-color] duration-150 shadow-sm ${colors.bg} ${colors.border} ${selected ? 'ring-1 ring-ring/60 shadow-md' : ''} ${opacityClass} ${interactionClass}`}
+      style={{ width: TASK_GRAPH_NODE_WIDTH }}
+      title={task.description}
       data-selected={selected ? 'true' : 'false'}
     >
       <Handle
@@ -87,10 +83,8 @@ export function TaskNode({ data }: TaskNodeProps) {
 
       <span className={`absolute left-0 top-0 bottom-0 w-[2px] ${dotClass}`} />
 
-      <div className={`text-[11px] font-medium leading-snug truncate pl-2 text-card-foreground ${isMuted ? 'line-through opacity-70' : ''}`}>
-        {task.description.length > 20
-          ? `${task.description.slice(0, 20)}...`
-          : task.description}
+      <div className={`line-clamp-3 pl-2 text-[12px] font-medium leading-4 text-card-foreground ${isMuted ? 'line-through opacity-70' : ''}`}>
+        {task.description}
       </div>
 
       <div className={`mt-0.5 pl-2 text-[8px] tracking-wide ${colors.text}`}>

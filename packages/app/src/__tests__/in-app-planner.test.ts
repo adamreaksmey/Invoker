@@ -2208,7 +2208,7 @@ tasks:
       })).toEqual({ ok: true });
       await expect(sendPlanningChatMessage({
         sessionId: 'planning-submitted',
-        message: 'change it',
+        message: 'change the background',
       }, {
         config: {},
         loadGeneratedPlan: vi.fn(),
@@ -2216,10 +2216,16 @@ tasks:
         planningCommandBuilder,
         conversationRepo: new ConversationRepository(adapter),
         planningSessionStore: adapter,
+        plannerReplyOverride: async () => 'I can draft a background change on this project.',
       })).resolves.toMatchObject({
-        ok: false,
-        error: 'This planning session was already submitted. Start a new planning chat for changes.',
+        ok: true,
+        reply: 'I can draft a background change on this project.',
       });
+      const reopened = sessions.get('planning-submitted');
+      expect(reopened?.status).toBe('still_discussing');
+      expect(reopened?.submittedWorkflowId).toBe('wf-123');
+      expect(reopened?.submittedPlanName).toBe('Submitted plan');
+      expect(reopened?.messages.some((line) => line.text === 'change the background')).toBe(true);
     } finally {
       adapter.close();
     }

@@ -96,7 +96,7 @@ describe('TaskDAG status filters', () => {
     const edge = await screen.findByTestId(`rf__edge-local:${setupTask.id}->${renderTask.id}`);
 
     await waitFor(() => {
-      expect(edge).toHaveAttribute('data-label', 'setup-task → render-task');
+      expect(edge).toHaveAttribute('data-label', 'Setup task → Render task');
     });
     expect(edge.getAttribute('data-label')).not.toContain('wf-alpha');
   });

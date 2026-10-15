@@ -654,7 +654,8 @@ export function App() {
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus | null>(
     () => (typeof window !== 'undefined' ? window.__INVOKER_BOOTSTRAP__?.runtimeStatus ?? null : null),
   );
-  const activePlanningReadOnly = activePlanningSessionSubmitted || runtimeStatus?.readOnly === true;
+  const planningWindowReadOnly = runtimeStatus?.readOnly === true;
+  const activePlanningReadOnly = activePlanningSessionSubmitted || planningWindowReadOnly;
   const activePlanningWorkflowRunning = activePlanningSession.submittedWorkflowId
     ? workflows.get(activePlanningSession.submittedWorkflowId)?.status === 'running'
     : false;
@@ -3069,7 +3070,7 @@ export function App() {
 
   const handlePlanningSubmit = useCallback(async () => {
     const input = planningInput.trim();
-    if (!input || activePlanningSessionBusy || activePlanningReadOnly) return;
+    if (!input || activePlanningSessionBusy || planningWindowReadOnly) return;
 
     const liveSession = planningSessionsRef.current.find((session) => session.id === activePlanningSessionIdRef.current);
     const pendingRepoInput = (liveSession?.repoInput ?? activePlanningSession.repoInput ?? '').trim();
@@ -3184,7 +3185,7 @@ export function App() {
   }, [
     activePlanningSessionBusy,
     activePlanningSessionId,
-    activePlanningReadOnly,
+    planningWindowReadOnly,
     appendTerminalLine,
     commitPlanningRepo,
     clearPlanningStreamForSessionIds,
@@ -4779,7 +4780,7 @@ export function App() {
                   <p className="mt-1 text-foreground">{activePlanningSession.submittedPlanName}</p>
                 </div>
               )}
-              {(draftPlanAvailable || activePlanningSession.status === 'submitted') && (
+              {(draftPlanAvailable || activePlanningSession.submittedWorkflowId || activePlanningSession.status === 'submitted') && (
                 <button
                   type="button"
                   data-testid="planning-context-open-graph"
@@ -4913,8 +4914,9 @@ export function App() {
             draftReviewOpen={activeDraftReviewOpen}
             draftPlanSummary={draftPlanSummary}
             planningStream={activePlanningStream}
-            readOnly={activePlanningReadOnly}
-            readOnlyReason={activePlanningSessionSubmitted ? 'submitted' : 'window'}
+            readOnly={planningWindowReadOnly}
+            readOnlyReason={planningWindowReadOnly ? 'window' : 'submitted'}
+            repositoryLocked={activePlanningSessionSubmitted}
             expanded={planningTerminalExpanded}
             mode={activePlanningMode}
             terminalSession={activePlanningTerminalSession}

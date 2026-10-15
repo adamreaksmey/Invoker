@@ -4,6 +4,7 @@ import { PLANNING_CLONE_IN_PROGRESS } from '@invoker/contracts/planning-clone-st
 import { ArrowUpIcon, ChevronDownIcon, GitBranchIcon, OptionsIcon, RepositoryIcon } from './icons/index.js';
 
 const COMPOSER_PLACEHOLDER = 'Describe what you want to build';
+const FOLLOW_UP_PLACEHOLDER = 'Describe a follow-up change for this project';
 const READ_ONLY_WINDOW_PLACEHOLDER = 'This window is read-only.';
 const READ_ONLY_SUBMITTED_PLACEHOLDER = 'This planning session was already submitted.';
 const REPO_PLACEHOLDER = 'URL or path';
@@ -47,6 +48,8 @@ export interface PlanningChatComposerProps {
   binding: boolean;
   readOnly: boolean;
   readOnlyReason: 'submitted' | 'window';
+  followUp?: boolean;
+  repositoryLocked?: boolean;
   expanded: boolean;
   disabledCursorClass: string;
   onValueChange: (event: ChangeEvent<HTMLTextAreaElement>) => void;
@@ -87,9 +90,10 @@ function fieldClass(extra: string): string {
 }
 
 function composerPlaceholder(composer: PlanningChatComposerProps): string {
-  if (!composer.readOnly) return COMPOSER_PLACEHOLDER;
-  if (composer.readOnlyReason === 'window') return READ_ONLY_WINDOW_PLACEHOLDER;
-  return READ_ONLY_SUBMITTED_PLACEHOLDER;
+  if (composer.readOnly && composer.readOnlyReason === 'window') return READ_ONLY_WINDOW_PLACEHOLDER;
+  if (composer.readOnly) return READ_ONLY_SUBMITTED_PLACEHOLDER;
+  if (composer.followUp) return FOLLOW_UP_PLACEHOLDER;
+  return COMPOSER_PLACEHOLDER;
 }
 
 function harnessValueLabel(composer: PlanningChatComposerProps): string {
@@ -166,7 +170,7 @@ function ComposerTextField(props: ComposerTextFieldProps): JSX.Element {
 
 function repoFieldsDisabled(composer: PlanningChatComposerProps): boolean {
   const editsLocked = composer.repoBound && !composer.repoEditing;
-  return composer.readOnly || composer.binding || editsLocked;
+  return composer.readOnly || composer.repositoryLocked === true || composer.binding || editsLocked;
 }
 
 function RepoField({ composer }: { composer: PlanningChatComposerProps }): JSX.Element {
@@ -256,7 +260,7 @@ function ComposerRepoNotices({ composer }: { composer: PlanningChatComposerProps
 }
 
 function RepoEditButton({ composer }: { composer: PlanningChatComposerProps }): JSX.Element | null {
-  if (!composer.repoBound || composer.readOnly || composer.binding) return null;
+  if (!composer.repoBound || composer.readOnly || composer.repositoryLocked || composer.binding) return null;
   if (composer.repoEditing) {
     return (
       <button

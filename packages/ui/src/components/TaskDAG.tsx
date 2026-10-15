@@ -71,8 +71,11 @@ type LayoutState = {
   result: TaskGraphLayout;
 };
 
-function truncateEdgeEndpoint(label: string): string {
-  return label.length > 12 ? label.slice(0, 12) + '..' : label;
+const EDGE_ENDPOINT_MAX_CHARS = 48;
+
+function limitEdgeEndpoint(label: string): string {
+  if (label.length <= EDGE_ENDPOINT_MAX_CHARS) return label;
+  return `${label.slice(0, EDGE_ENDPOINT_MAX_CHARS - 1)}…`;
 }
 
 function unscopedTaskId(task: TaskState): string {
@@ -86,7 +89,9 @@ function unscopedTaskId(task: TaskState): string {
 /** Short label for edge hover tooltip showing the dependency relationship. */
 function buildEdgeEndpointLabel(taskId: string, task?: TaskState): string {
   if (task?.config.isMergeNode || isMergeGateId(taskId)) return 'Merge';
-  return truncateEdgeEndpoint(task ? unscopedTaskId(task) : taskId);
+  const description = task?.description.trim();
+  if (description) return limitEdgeEndpoint(description);
+  return limitEdgeEndpoint(task ? unscopedTaskId(task) : taskId);
 }
 
 function buildEdgeLabel(

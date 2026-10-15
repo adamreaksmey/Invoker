@@ -4,6 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { layoutNodes, layoutTaskGraph, countCrossings } from '../lib/layout.js';
+import { TASK_GRAPH_NODE_HEIGHT } from '../lib/task-graph-metrics.js';
 import type { TaskState } from '../types.js';
 
 function makeTask(
@@ -130,7 +131,7 @@ describe('layoutNodes', () => {
 
     // The gap between A and X should be > base gap (24)
     // because A has 4 children (4 connections)
-    const gap = Math.abs(posA.y - posX.y) - 40; // subtract NODE_HEIGHT
+    const gap = Math.abs(posA.y - posX.y) - TASK_GRAPH_NODE_HEIGHT;
     expect(gap).toBeGreaterThan(24);
   });
 

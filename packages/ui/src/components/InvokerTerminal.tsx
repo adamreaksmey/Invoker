@@ -195,6 +195,7 @@ interface InvokerTerminalProps {
   planningStream?: InvokerTerminalPlanningStream | null;
   readOnly?: boolean;
   readOnlyReason?: 'submitted' | 'window';
+  repositoryLocked?: boolean;
   expanded?: boolean;
   mode?: PlanningTerminalMode;
   terminalSession?: TerminalSessionDescriptor | null;
@@ -852,6 +853,7 @@ export function InvokerTerminal({
   planningStream,
   readOnly = false,
   readOnlyReason = 'submitted',
+  repositoryLocked = false,
   expanded = false,
   mode = 'chat',
   terminalSession = null,
@@ -1289,7 +1291,7 @@ export function InvokerTerminal({
             </div>
           )}
 
-          {readOnly && submittedPlanName && onOpenGraph && (
+          {submittedPlanName && onOpenGraph && (
             <div
               data-testid="invoker-terminal-submitted-bar"
               className="sticky bottom-0 z-10 border-t border-border bg-card/80 px-4 py-3.5 text-sm text-foreground backdrop-blur-sm"
@@ -1329,6 +1331,8 @@ export function InvokerTerminal({
             binding={binding}
             readOnly={readOnly}
             readOnlyReason={readOnlyReason}
+            followUp={Boolean(submittedPlanName) && !readOnly}
+            repositoryLocked={repositoryLocked}
             expanded={expanded}
             disabledCursorClass={composerDisabledCursorClass}
             onValueChange={handleValueChange}

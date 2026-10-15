@@ -108,7 +108,7 @@ A task can also reach the terminal `skipped` status when an upstream task fails;
 
 Click **Create workflow**.
 
-This loads the workflow in a staged state. It does not start tasks.
+This loads the workflow in a staged state. It does not start tasks. You can return to the same planning chat and describe a follow-up change for that repository. The submitted plan stays available from **Open graph**.
 
 Click **Open graph** and select the workflow node. The task DAG should show the implementation and verification tasks as pending. You can inspect their prompts, commands, dependencies, and repository metadata before execution. The floating task DAG starts compact; **Larger** on its title bar expands it, and **Smaller** returns it to the compact size.
 
