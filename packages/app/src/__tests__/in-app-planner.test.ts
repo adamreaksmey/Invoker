@@ -2411,6 +2411,7 @@ describe('planning chat worktree provisioning', () => {
       expectedBranch,
       'fake-head-sha',
       sessionId,
+      { reclaimIdlePlanningWorktrees: true },
     );
     const session = sessions.get(sessionId);
     expect(session?.repoUrl).toBe('https://example.com/repo.git');
@@ -2562,6 +2563,7 @@ describe('planning chat worktree provisioning', () => {
       'invoker/planning/planning-worktree-restore',
       'stored-base-commit',
       'planning-worktree-restore',
+      { reclaimIdlePlanningWorktrees: true },
     );
     expect(repoPool.resolveBaseCommit).not.toHaveBeenCalled();
     const session = sessions.get('planning-worktree-restore');
@@ -2862,6 +2864,7 @@ describe('rebindPlanningChatRepo', () => {
       'invoker/planning/provision-session',
       'new-head-sha',
       'provision-session',
+      { reclaimIdlePlanningWorktrees: true },
     );
     const stored = sessions.get(session.id);
     expect(stored?.repoUrl).toBe('https://example.com/new-repo.git');

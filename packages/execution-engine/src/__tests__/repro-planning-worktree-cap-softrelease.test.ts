@@ -175,4 +175,40 @@ describe('planning worktree cap with softRelease', () => {
 
     expect(maxOnDiskObserved).toBeLessThanOrEqual(MAX_WORKTREES);
   });
+
+  it('replaces an idle planning checkout so a new chat can bind the same repo', async () => {
+    pool = new RepoPool({
+      cacheDir: tmpDir,
+      maxWorktrees: 1,
+      worktreeBaseDir,
+    });
+
+    const clonePath = await pool.ensureCloneThroughRepoQueue(localRepoUrl);
+    const first = await pool.acquireWorktree(
+      localRepoUrl,
+      resolvePlanningWorktreeBranch('chat-a'),
+      undefined,
+      'chat-a',
+      { reclaimIdlePlanningWorktrees: true },
+    );
+    first.softRelease();
+
+    const second = await pool.acquireWorktree(
+      localRepoUrl,
+      resolvePlanningWorktreeBranch('chat-b'),
+      undefined,
+      'chat-b',
+      { reclaimIdlePlanningWorktrees: true },
+    );
+    second.softRelease();
+
+    const porcelain = execSync('git worktree list --porcelain', {
+      cwd: clonePath,
+      encoding: 'utf8',
+    });
+    const branches = parseGitWorktreePorcelain(porcelain).map((entry) => entry.branch);
+    expect(branches).toContain('invoker/planning/chat-b');
+    expect(branches).not.toContain('invoker/planning/chat-a');
+    expect(countPlanningWorktrees(clonePath)).toBe(1);
+  });
 });

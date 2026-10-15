@@ -167,7 +167,7 @@ Use the in-app planning flow above when you want to review the graph before star
 
 For another repository:
 
-- Enter the repository in the planning composer before the first message. Type a base branch when it is not the remote default. Invoker will not fall back to the local checkout or `defaultRepoUrl`.
+- Enter the repository in the planning composer before the first message. Type a base branch when it is not the remote default. A new chat is a new plan, including when it uses a repository that already has a planning checkout. Invoker will not fall back to the local checkout or `defaultRepoUrl`.
 - Give the agent one concrete implementation task.
 - Add deterministic command tasks for verification.
 - Use `onFinish: none` while learning or when no remote publication is required.
