@@ -530,6 +530,25 @@ describe('Invoker terminal (component)', () => {
     expect(times[2]).toHaveTextContent('5:08 PM');
   });
 
+  it('renders assistant replies as formatted markdown', () => {
+    render(<InvokerTerminal
+      {...terminalProps({
+        lines: [{
+          id: 1,
+          role: 'assistant',
+          text: 'This repo is a `package.json`.\n\n- **Basic:** add todos.',
+        }],
+      })}
+    />);
+
+    const message = screen.getByTestId('invoker-terminal-assistant-message');
+    expect(message.querySelector('code')).toHaveTextContent('package.json');
+    expect(message.querySelector('strong')).toHaveTextContent('Basic:');
+    expect(message.querySelector('li')).toHaveTextContent('add todos.');
+    expect(message).not.toHaveTextContent('`package.json`');
+    expect(message).not.toHaveTextContent('**Basic:**');
+  });
+
   it('preserves a still-valid model when switching harnesses', () => {
     const onPresetChange = vi.fn();
     render(<InvokerTerminal

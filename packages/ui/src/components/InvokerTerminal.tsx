@@ -14,6 +14,7 @@ import {
 } from '../lib/planning-chat-message-ui.js';
 import { Button } from './primitives/Button.js';
 import { AlertCircleIcon, RefreshIcon, StopIcon } from './icons/index.js';
+import { MarkdownText } from './MarkdownText.js';
 import { PlanningChatComposer } from './PlanningChatComposer.js';
 
 const REPO_VALIDATION_WAIT_MESSAGE = 'Validating the repository. Please wait.';
@@ -271,9 +272,11 @@ function MessageBody({ text, toneClass }: { text: string; toneClass: string }): 
         const prose = segment.text.replace(/^\n+|\n+$/g, '');
         if (!prose) return null;
         return (
-          <div key={`prose-${index}`} className="whitespace-pre-wrap font-sans text-[13.5px] leading-6">
-            {prose}
-          </div>
+          <MarkdownText
+            key={`prose-${index}`}
+            text={prose}
+            className="font-sans text-[13.5px] leading-6"
+          />
         );
       })}
     </div>
