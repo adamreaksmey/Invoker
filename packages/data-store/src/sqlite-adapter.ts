@@ -91,7 +91,7 @@ import {
   readLastSpoolLinesFromFile,
 } from './sqlite-output-spool.js';
 import { SlowQueryAggregator, type SlowQueryShapeStats } from './slow-query-aggregator.js';
-import type { SqliteExecutor } from './sqlite-executor.js';
+import { SQLITE_READ_ONLY_PROCESS_ERROR, type SqliteExecutor } from './sqlite-executor.js';
 import * as migrations from './sqlite-migrations.js';
 import { SqliteTaskAttemptRepository } from './sqlite-task-attempt-repository.js';
 import {
@@ -117,6 +117,7 @@ function loadNativeSqlite(): Promise<NativeSqlite> {
 const ACTION_GRAPH_RECENT_ATTEMPT_LIMIT = 3;
 
 export const GET_EVENTS_DEFAULT_LIMIT = 10_000;
+export { SQLITE_READ_ONLY_PROCESS_ERROR };
 
 const DEFAULT_ACTIVITY_LOG_MAX_ROWS = 100_000;
 const ACTIVITY_LOG_PRUNE_INTERVAL = 1_000; // prune at most once per N writes
@@ -1196,7 +1197,7 @@ export class SQLiteAdapter implements PersistenceAdapter {
 
   private ensureWritable(): void {
     if (this.readOnly) {
-      throw new Error('SQLiteAdapter is read-only in this process');
+      throw new Error(SQLITE_READ_ONLY_PROCESS_ERROR);
     }
   }
 

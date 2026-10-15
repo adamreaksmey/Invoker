@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import * as ReactFlowModule from '@xyflow/react';
 import { TaskDAG } from '../components/TaskDAG.js';
@@ -120,7 +120,7 @@ describe('TaskDAG status filters', () => {
       ['wf-1', { id: 'wf-1', name: 'Vue todo', status: 'review_ready' }],
     ]);
 
-    render(
+    const { rerender } = render(
       <TaskDAG
         tasks={tasks}
         workflows={workflows}
@@ -131,10 +131,21 @@ describe('TaskDAG status filters', () => {
     await screen.findByTestId(`rf__node-${task.id}`);
     expect(screen.getAllByText('docs').length).toBeGreaterThan(0);
     expect(screen.getAllByText('active').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Check ephemeral handoff artifacts').length).toBeGreaterThan(0);
-    expect(screen.getByTestId('task-graph-selection-summary')).toHaveTextContent('Artifacts stay out of the repo');
-    expect(screen.getByTestId('task-graph-selection-summary')).toHaveTextContent(
-      'Check the completed handoff for ephemeral inter-task artifacts.',
+    expect(screen.queryByTestId('task-graph-selection-summary')).not.toBeInTheDocument();
+
+    rerender(
+      <TaskDAG
+        tasks={tasks}
+        workflows={workflows}
+        selectedTaskId={task.id}
+        surfaceMode="browser"
+      />,
     );
+
+    const summary = screen.getByTestId('task-graph-selection-summary');
+    expect(summary).not.toHaveTextContent('Artifacts stay out of the repo');
+    fireEvent.click(screen.getByTestId('task-graph-selection-summary-toggle'));
+    expect(summary).toHaveTextContent('Artifacts stay out of the repo');
+    expect(summary).toHaveTextContent('Check the completed handoff for ephemeral inter-task artifacts.');
   });
 });

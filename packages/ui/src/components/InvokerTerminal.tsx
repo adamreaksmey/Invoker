@@ -203,6 +203,7 @@ interface InvokerTerminalProps {
   terminalError?: string | null;
   terminalActive?: boolean;
   workflowRunning?: boolean;
+  submittedWorkBuilt?: boolean;
   repoValue?: string;
   baseBranchValue?: string;
   repoBound?: boolean;
@@ -861,6 +862,7 @@ export function InvokerTerminal({
   terminalError = null,
   terminalActive = true,
   workflowRunning = false,
+  submittedWorkBuilt = false,
   onValueChange,
   onSubmit,
   repoValue = '',
@@ -1153,6 +1155,8 @@ export function InvokerTerminal({
       </div>
     );
   }, [busy, lines, onRetryTurn, planningStream, readOnly, turnError]);
+  const showDraftReadyBar = draftPlanAvailable && !draftReviewOpen && !readOnly && !(submittedWorkBuilt && repositoryLocked);
+  const showSubmittedPlanBar = Boolean(submittedPlanName && onOpenGraph) && !submittedWorkBuilt;
   return (
     <section className="relative flex h-full min-h-0 flex-col bg-background">
       <div className="flex items-center justify-end gap-2 border-b border-border bg-background px-4 py-2.5">
@@ -1259,7 +1263,7 @@ export function InvokerTerminal({
             )}
           </div>
 
-          {draftPlanAvailable && !draftReviewOpen && !readOnly && (
+          {showDraftReadyBar && (
             <div
               data-testid="invoker-terminal-ready-bar"
               className="sticky bottom-0 z-10 border-t border-border bg-card/80 px-4 py-3.5 text-sm text-foreground backdrop-blur-sm"
@@ -1291,7 +1295,7 @@ export function InvokerTerminal({
             </div>
           )}
 
-          {submittedPlanName && onOpenGraph && (
+          {showSubmittedPlanBar && (
             <div
               data-testid="invoker-terminal-submitted-bar"
               className="sticky bottom-0 z-10 border-t border-border bg-card/80 px-4 py-3.5 text-sm text-foreground backdrop-blur-sm"

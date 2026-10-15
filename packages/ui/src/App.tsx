@@ -46,6 +46,7 @@ import { WorkerDetailsPanel } from './components/WorkerDetailsPanel.js';
 import { WorkerDetailControl } from './components/WorkerDetailControl.js';
 import { WorkerActivityCard } from './components/WorkerActivityCard.js';
 import { groupWorkflowCoreActivity } from './lib/workflow-core-activity.js';
+import { isWorkflowBuilt } from './lib/workflow-status.js';
 import { ActionGraphView } from './components/ActionGraphView.js';
 import { WorkflowStatusChips } from './components/WorkflowStatusChips.js';
 import { TerminalDrawer, type TerminalDrawerState } from './components/TerminalDrawer.js';
@@ -656,9 +657,11 @@ export function App() {
   );
   const planningWindowReadOnly = runtimeStatus?.readOnly === true;
   const activePlanningReadOnly = activePlanningSessionSubmitted || planningWindowReadOnly;
-  const activePlanningWorkflowRunning = activePlanningSession.submittedWorkflowId
-    ? workflows.get(activePlanningSession.submittedWorkflowId)?.status === 'running'
-    : false;
+  const submittedWorkflowStatus = activePlanningSession.submittedWorkflowId
+    ? workflows.get(activePlanningSession.submittedWorkflowId)?.status
+    : undefined;
+  const activePlanningWorkflowRunning = submittedWorkflowStatus === 'running';
+  const activePlanningWorkflowBuilt = isWorkflowBuilt(submittedWorkflowStatus);
   const planningRepoSuggestions = useMemo(() => {
     const repos = new Set<string>();
     for (const workflow of workflows.values()) {
@@ -4923,6 +4926,7 @@ export function App() {
             terminalBusy={activePlanningTerminalBusy}
             terminalError={activePlanningTerminalError}
             workflowRunning={activePlanningWorkflowRunning}
+            submittedWorkBuilt={activePlanningWorkflowBuilt}
             submittedPlanName={activePlanningSession.submittedPlanName}
             repoValue={activePlanningSession.repoInput ?? activePlanningSession.repoUrl ?? ''}
             baseBranchValue={planningRepoEditing

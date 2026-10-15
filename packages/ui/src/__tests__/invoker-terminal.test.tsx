@@ -669,6 +669,41 @@ describe('Invoker terminal (component)', () => {
     expect(within(bar).getByTestId('invoker-terminal-open-graph')).toBeInTheDocument();
   });
 
+  it('hides draft ready and plan ready once the submitted workflow is built', () => {
+    render(<InvokerTerminal
+      {...terminalProps({
+        readOnly: false,
+        repositoryLocked: true,
+        draftPlanAvailable: true,
+        draftPlanSummary: { name: 'Submitted Plan', taskCount: 2 },
+        submittedPlanName: 'Submitted Plan',
+        submittedWorkBuilt: true,
+        workflowRunning: false,
+        onOpenGraph: vi.fn(),
+      })}
+    />);
+
+    expect(screen.queryByTestId('invoker-terminal-ready-bar')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('invoker-terminal-submitted-bar')).not.toBeInTheDocument();
+  });
+
+  it('keeps a follow-up draft ready bar after the earlier workflow is built', () => {
+    render(<InvokerTerminal
+      {...terminalProps({
+        readOnly: false,
+        repositoryLocked: false,
+        draftPlanAvailable: true,
+        draftPlanSummary: { name: 'Follow-up plan', taskCount: 1 },
+        submittedPlanName: 'Submitted Plan',
+        submittedWorkBuilt: true,
+        onOpenGraph: vi.fn(),
+      })}
+    />);
+
+    expect(screen.getByTestId('invoker-terminal-ready-bar')).toHaveTextContent('Follow-up plan');
+    expect(screen.queryByTestId('invoker-terminal-submitted-bar')).not.toBeInTheDocument();
+  });
+
   function makePlanningTerminalSession(
     overrides: Partial<TerminalSessionDescriptor> = {},
   ): TerminalSessionDescriptor {

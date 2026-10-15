@@ -686,14 +686,14 @@ function TaskDAGInner({ tasks, workflows, selectedTaskId, cameraCommand, onTaskC
     );
   }
 
-  const browserHeight = surfaceMode === 'browser' ? '300px' : '100%';
   const selectedTask = selectedTaskId ? tasks.get(selectedTaskId) : undefined;
+  const selectedSummaryTask = surfaceMode === 'default' ? undefined : selectedTask;
 
   return (
     <div
       ref={graphRootRef}
       className="flex min-h-0 w-full flex-1 flex-col overflow-hidden"
-      style={{ height: browserHeight }}
+      style={{ height: '100%' }}
     >
       <div className="min-h-0 flex-1">
       <ReactFlow
@@ -729,7 +729,7 @@ function TaskDAGInner({ tasks, workflows, selectedTaskId, cameraCommand, onTaskC
         />
       </ReactFlow>
       </div>
-      {selectedTask ? <TaskGraphSelectionSummary task={selectedTask} /> : null}
+      {selectedSummaryTask ? <TaskGraphSelectionSummary task={selectedSummaryTask} /> : null}
     </div>
   );
 }
