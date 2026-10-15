@@ -97,6 +97,8 @@ function planningSession(
     presetKey: 'codex',
     confirmationMode: 'require',
     status: 'still_discussing',
+    repoUrl: 'https://example.com/repo.git',
+    baseBranch: 'main',
     messages: [],
     conversation: new PlanConversation({}),
     createdAt: '2026-07-07T00:00:00.000Z',
@@ -104,6 +106,21 @@ function planningSession(
     nextMessageId: 1,
     ...overrides,
   };
+}
+
+const EXPLICIT_SUBMIT_REPO = {
+  repoUrl: 'https://example.com/repo.git',
+  baseBranch: 'main',
+};
+
+function allowDraftSubmit(
+  sessions: { get(id: string): { repoUrl?: string; baseBranch?: string } | undefined },
+  sessionId: string | undefined,
+): void {
+  const session = sessionId ? sessions.get(sessionId) : undefined;
+  if (!session) throw new Error('missing planning session');
+  session.repoUrl ??= EXPLICIT_SUBMIT_REPO.repoUrl;
+  session.baseBranch ??= EXPLICIT_SUBMIT_REPO.baseBranch;
 }
 
 const VALID_PLAN_WITHOUT_CLOSING_FENCE = `Here is the plan.
@@ -1040,6 +1057,7 @@ tasks:
       planningCommandBuilder,
     });
     if (!sent.ok) throw new Error(sent.error);
+    allowDraftSubmit(sessions, sent.sessionId);
     expect(sessions.get(sent.sessionId)?.status).toBe('draft_ready');
     const loadGeneratedPlan = vi.fn().mockResolvedValue({
       planName: 'Mock Plan',
@@ -1060,7 +1078,7 @@ tasks:
       workflowIds: ['wf-1'],
       workflowCount: 1,
     });
-    expect(loadGeneratedPlan).toHaveBeenCalledWith(expect.stringContaining('name: Mock Plan'));
+    expect(loadGeneratedPlan).toHaveBeenCalledWith(expect.stringContaining('name: Mock Plan'), EXPLICIT_SUBMIT_REPO);
   });
 
   it('passes the bound repository to the submit loader', async () => {
@@ -1104,6 +1122,7 @@ tasks:
       planningCommandBuilder,
     });
     if (!sent.ok) throw new Error(sent.error);
+    allowDraftSubmit(sessions, sent.sessionId);
     const loadGeneratedPlan = vi.fn().mockResolvedValue({
       planName: 'Mock Plan',
       workflowId: 'wf-1',
@@ -1123,7 +1142,7 @@ tasks:
       workflowIds: ['wf-1'],
       workflowCount: 1,
     });
-    expect(loadGeneratedPlan).toHaveBeenCalledWith(expect.stringContaining('name: Mock Plan'));
+    expect(loadGeneratedPlan).toHaveBeenCalledWith(expect.stringContaining('name: Mock Plan'), EXPLICIT_SUBMIT_REPO);
   });
 
   it('coalesces concurrent submit requests for one session', async () => {
@@ -1139,6 +1158,7 @@ tasks:
       planningCommandBuilder,
     });
     if (!sent.ok) throw new Error(sent.error);
+    allowDraftSubmit(sessions, sent.sessionId);
 
     let resolveLoad: ((value: LoadedGeneratedPlan) => void) | undefined;
     const loadGeneratedPlan = vi.fn(() => new Promise<LoadedGeneratedPlan>((resolve) => {
@@ -1635,6 +1655,7 @@ tasks:
       planningCommandBuilder,
     });
     if (!sent.ok) throw new Error(sent.error);
+    allowDraftSubmit(sessions, sent.sessionId);
     const loadGeneratedPlan = vi.fn().mockRejectedValue(new Error('Task "make-selected-lists-scroll" uses "autoFix", which is no longer supported.'));
 
     await expect(submitPlanningChatDraft({
@@ -1702,6 +1723,7 @@ tasks:
       planningCommandBuilder,
     });
     if (!sent.ok) throw new Error(sent.error);
+    allowDraftSubmit(sessions, sent.sessionId);
     const loadGeneratedPlan = vi.fn().mockResolvedValue({
       planName: 'Workers Surface',
       workflowId: 'wf-2',
@@ -1839,6 +1861,8 @@ tasks:
       conversation: new PlanConversation({}),
       draftPlanSummary: { name: 'Bad Summary', taskCount: 1, steps: ['Numeric id'] },
       draftPlanText: 'name: Bad Summary\ntasks:\n  - id: 1\n    description: Numeric id\n',
+      repoUrl: EXPLICIT_SUBMIT_REPO.repoUrl,
+      baseBranch: EXPLICIT_SUBMIT_REPO.baseBranch,
       createdAt: '2026-07-07T00:00:00.000Z',
       updatedAt: '2026-07-07T00:00:00.000Z',
       nextMessageId: 1,
@@ -1934,6 +1958,8 @@ tasks:
         ],
         draftPlanSummary: { name: 'Mock Plan', taskCount: 2, steps: ['First task', 'Second task'] },
         draftPlanText: VALID_PLAN_TEXT,
+        repoUrl: EXPLICIT_SUBMIT_REPO.repoUrl,
+        baseBranch: EXPLICIT_SUBMIT_REPO.baseBranch,
         pendingResponse: false,
         createdAt: '2026-07-07T00:00:00.000Z',
         updatedAt: '2026-07-07T00:00:02.000Z',
@@ -1959,8 +1985,8 @@ tasks:
         loadGeneratedPlan,
         planningSessionStore: adapter,
       })).resolves.toMatchObject({ ok: true, planName: 'Mock Plan', workflowId: 'wf-1' });
-      expect(loadGeneratedPlan).toHaveBeenCalledWith(expect.stringContaining('name: Mock Plan'));
-      expect(loadGeneratedPlan).toHaveBeenCalledWith(expect.not.stringContaining('```yaml'));
+      expect(loadGeneratedPlan).toHaveBeenCalledWith(expect.stringContaining('name: Mock Plan'), EXPLICIT_SUBMIT_REPO);
+      expect(loadGeneratedPlan).toHaveBeenCalledWith(expect.not.stringContaining('```yaml'), EXPLICIT_SUBMIT_REPO);
     } finally {
       rmSync(join(resolveInvokerHomeRoot(), 'plan-drafts', 'planning-restored.yaml'), { force: true });
       adapter.close();
@@ -2332,14 +2358,31 @@ describe('planning chat worktree provisioning', () => {
     };
   }
 
-  it('provisions a worktree and persists the binding fields when repoPool + config.defaultRepoUrl are set', async () => {
+  it('does not bind config.defaultRepoUrl when the user has not chosen a repository', async () => {
+    const repoPool = createFakeRepoPool('/fake/worktree/create-session');
+    const sessions = createInAppPlanningChatSessions();
+
+    const created = await createPlanningChatSession({}, {
+      config: { defaultRepoUrl: 'https://example.com/repo.git', defaultBranch: 'main' },
+      loadGeneratedPlan: vi.fn(),
+      sessions,
+      planningCommandBuilder,
+      repoPool,
+    });
+    if (!created.ok) throw new Error(created.error);
+
+    expect(created.session.repoUrl).toBeUndefined();
+    expect(created.session.baseBranch).toBeUndefined();
+    expect(repoPool.acquireWorktree).not.toHaveBeenCalled();
+  });
+
+  it('provisions a worktree only after an explicit repository bind', async () => {
     const worktreePath = '/fake/worktree/create-session';
     const repoPool = createFakeRepoPool(worktreePath);
     const sessions = createInAppPlanningChatSessions();
     const upsert = vi.fn();
-
-    const created = await createPlanningChatSession({}, {
-      config: { defaultRepoUrl: 'https://example.com/repo.git', defaultBranch: 'main' },
+    const deps = {
+      config: { defaultRepoUrl: 'https://example.com/other.git', defaultBranch: 'main' },
       loadGeneratedPlan: vi.fn(),
       sessions,
       planningCommandBuilder,
@@ -2349,42 +2392,31 @@ describe('planning chat worktree provisioning', () => {
         updateInAppPlanningSession: vi.fn(),
         deleteInAppPlanningSession: vi.fn(),
       },
-    });
+    };
+
+    const created = await createPlanningChatSession({}, deps);
     if (!created.ok) throw new Error(created.error);
     const sessionId = created.session.id;
+    const rebound = await rebindPlanningChatRepo({
+      sessionId,
+      repoUrl: 'https://example.com/repo.git',
+      baseBranch: 'main',
+    }, deps);
+    expect(rebound).toEqual({ ok: true, action: 'provision' });
+
     const expectedBranch = `invoker/planning/${sessionId}`;
-
-    expect(created.session.repoUrl).toBe('https://example.com/repo.git');
-    expect(created.session.baseBranch).toBe('main');
-    expect(created.session.baseCommit).toBe('fake-head-sha');
-    expect((created.session as { worktreePath?: string }).worktreePath).toBeUndefined();
-    expect((created.session as { worktreeBranch?: string }).worktreeBranch).toBeUndefined();
-
     expect(repoPool.ensureCloneThroughRepoQueue).toHaveBeenCalledWith('https://example.com/repo.git');
-    expect(repoPool.resolveBaseCommit).toHaveBeenCalledWith('https://example.com/repo.git', 'main');
     expect(repoPool.acquireWorktree).toHaveBeenCalledWith(
       'https://example.com/repo.git',
       expectedBranch,
       'fake-head-sha',
       sessionId,
     );
-    expect(repoPool.softRelease).toHaveBeenCalledTimes(1);
-
     const session = sessions.get(sessionId);
     expect(session?.repoUrl).toBe('https://example.com/repo.git');
     expect(session?.baseBranch).toBe('main');
-    expect(session?.baseCommit).toBe('fake-head-sha');
     expect(session?.worktreePath).toBe(worktreePath);
-    expect(session?.worktreeBranch).toBe(expectedBranch);
     expect(session?.conversation.workingDir).toBe(worktreePath);
-
-    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
-      repoUrl: 'https://example.com/repo.git',
-      baseBranch: 'main',
-      baseCommit: 'fake-head-sha',
-      worktreePath,
-      worktreeBranch: expectedBranch,
-    }));
   });
 
   it('preserves repo binding fields across the summary-to-hydrated-session round trip', async () => {
@@ -2393,15 +2425,32 @@ describe('planning chat worktree provisioning', () => {
     const sessions = createInAppPlanningChatSessions();
 
     const created = await createPlanningChatSession({}, {
-      config: { defaultRepoUrl: 'https://example.com/repo.git', defaultBranch: 'main' },
+      config: { defaultBranch: 'main' },
       loadGeneratedPlan: vi.fn(),
       sessions,
       planningCommandBuilder,
       repoPool,
     });
     if (!created.ok) throw new Error(created.error);
+    const rebound = await rebindPlanningChatRepo({
+      sessionId: created.session.id,
+      repoUrl: 'https://example.com/repo.git',
+      baseBranch: 'main',
+    }, {
+      config: { defaultBranch: 'main' },
+      sessions,
+      planningCommandBuilder,
+      repoPool,
+    });
+    expect(rebound.ok).toBe(true);
+    const stored = sessions.get(created.session.id);
 
-    const hydrated = hydrateRemotePlanningTerminalSession(created.session);
+    const hydrated = hydrateRemotePlanningTerminalSession({
+      ...created.session,
+      repoUrl: stored?.repoUrl,
+      baseBranch: stored?.baseBranch,
+      baseCommit: stored?.baseCommit,
+    });
     expect(hydrated.repoUrl).toBe('https://example.com/repo.git');
     expect(hydrated.baseBranch).toBe('main');
     expect(hydrated.baseCommit).toBe('fake-head-sha');
@@ -2568,13 +2617,24 @@ describe('planning chat worktree provisioning', () => {
       const sessions = createInAppPlanningChatSessions();
 
       const created = await createPlanningChatSession({}, {
-        config: { defaultRepoUrl: 'https://example.com/repo.git', defaultBranch: 'main' },
+        config: { defaultBranch: 'main' },
         loadGeneratedPlan: vi.fn(),
         sessions,
         planningCommandBuilder,
         repoPool,
       });
       if (!created.ok) throw new Error(created.error);
+      const rebound = await rebindPlanningChatRepo({
+        sessionId: created.session.id,
+        repoUrl: 'https://example.com/repo.git',
+        baseBranch: 'main',
+      }, {
+        config: { defaultBranch: 'main' },
+        sessions,
+        planningCommandBuilder,
+        repoPool,
+      });
+      expect(rebound.ok).toBe(true);
 
       const mcpConfigPath = join(worktreePath, '.mcp.json');
       expect(existsSync(mcpConfigPath)).toBe(true);
@@ -3060,7 +3120,7 @@ describe('rebindPlanningChatRepo', () => {
     sessions.set(session.id, session);
 
     const result = await rebindPlanningChatRepo({ sessionId: session.id }, {
-      config: {},
+      config: { defaultRepoUrl: 'https://example.com/repo.git', defaultBranch: 'main' },
       sessions,
       repoPool,
     });
@@ -3255,6 +3315,8 @@ describe('immutable in-app planning draft submission', () => {
         draftPlanSummary: { name: 'Mock Plan', taskCount: 2, steps: ['First task', 'Second task'] },
         planningDraftId: approved.id,
         planningDraftHash: approved.contentHash,
+        repoUrl: EXPLICIT_SUBMIT_REPO.repoUrl,
+        baseBranch: EXPLICIT_SUBMIT_REPO.baseBranch,
         createdAt: now,
         updatedAt: now,
         nextMessageId: 1,
@@ -3268,7 +3330,7 @@ describe('immutable in-app planning draft submission', () => {
       });
 
       expect(submitted.ok).toBe(true);
-      expect(loadGeneratedPlan).toHaveBeenCalledWith(approved.planText);
+      expect(loadGeneratedPlan).toHaveBeenCalledWith(approved.planText, EXPLICIT_SUBMIT_REPO);
       expect(conversation.approvedPlanningDraft?.status).toBe('submitted');
 
       session.status = 'draft_ready';

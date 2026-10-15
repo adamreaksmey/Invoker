@@ -34,6 +34,10 @@ describe('planning terminal preset ownership repro', () => {
   }
 
   function submitPlanningText(text: string) {
+    const repoInput = screen.queryByTestId('invoker-terminal-repo') as HTMLInputElement | null;
+    if (repoInput && !repoInput.value) {
+      fireEvent.change(repoInput, { target: { value: 'https://example.com/planning-repo.git' } });
+    }
     fireEvent.change(screen.getByTestId('invoker-terminal-input'), { target: { value: text } });
     fireEvent.submit(screen.getByTestId('invoker-terminal-input').closest('form')!);
   }

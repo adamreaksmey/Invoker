@@ -40,6 +40,7 @@ describe('CodeRabbit PR #3050 — Enter-to-submit ignores IME composition', () =
     render(<App />);
     await openPlanningTerminal();
 
+    fireEvent.change(screen.getByTestId('invoker-terminal-repo'), { target: { value: 'https://example.com/planning-repo.git' } });
     const input = screen.getByTestId('invoker-terminal-input');
     fireEvent.change(input, { target: { value: 'こんにちは' } });
 
@@ -51,7 +52,7 @@ describe('CodeRabbit PR #3050 — Enter-to-submit ignores IME composition', () =
     // A subsequent plain Enter (composition finished) submits normally.
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => {
-      expect(vi.mocked(mock.api.planningChatSend)).toHaveBeenCalledWith({ turnId: expect.any(String), message: 'こんにちは', presetKey: 'codex', confirmationMode: 'require' });
+      expect(vi.mocked(mock.api.planningChatSend)).toHaveBeenCalledWith({ turnId: expect.any(String), sessionId: 'session-1', message: 'こんにちは', presetKey: 'codex', confirmationMode: 'require' });
     });
   });
 });

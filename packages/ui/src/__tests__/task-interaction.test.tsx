@@ -159,6 +159,7 @@ describe('Task interaction (component)', () => {
     await screen.findByTestId('selected-workflow-mini-dag');
     fireEvent.click(await screen.findByTestId('rf__node-task-worker-action'));
 
+    fireEvent.click(await screen.findByTestId('task-logs-toggle'));
     await waitFor(() => {
       expect(screen.getByTestId('task-logs-section')).toHaveTextContent(
         'pr-summary-refresh/refresh-pr-summary completed: Updated PR body with Invoker pipeline summary',

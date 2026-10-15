@@ -1034,6 +1034,7 @@ describe('WorkflowInspector', () => {
         />,
       );
 
+      fireEvent.click(screen.getByTestId('task-logs-toggle'));
       await waitFor(() => expect(screen.getByText('Preparing review workspace')).toBeInTheDocument());
       expect(screen.getByText('Merge gate failed')).toBeInTheDocument();
       await waitFor(() => expect(screen.getByText('Queued auto-fix with agent')).toBeInTheDocument());
@@ -1112,6 +1113,7 @@ describe('WorkflowInspector', () => {
         />,
       );
 
+      fireEvent.click(screen.getByTestId('task-logs-toggle'));
       await waitFor(() => expect(screen.getByTestId('task-log-error')).toHaveTextContent('Could not load logs. Retrying…'));
     } finally {
       delete (window as unknown as { invoker?: unknown }).invoker;

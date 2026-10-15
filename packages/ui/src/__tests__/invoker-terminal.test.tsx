@@ -187,6 +187,10 @@ describe('Invoker terminal (component)', () => {
   }
 
   function submitPlanningText(text: string) {
+    const repoInput = screen.queryByTestId('invoker-terminal-repo') as HTMLInputElement | null;
+    if (repoInput && !repoInput.value) {
+      fireEvent.change(repoInput, { target: { value: 'https://example.com/planning-repo.git' } });
+    }
     fireEvent.change(screen.getByTestId('invoker-terminal-input'), { target: { value: text } });
     fireEvent.submit(screen.getByTestId('invoker-terminal-input').closest('form')!);
   }
@@ -924,7 +928,7 @@ describe('Invoker terminal (component)', () => {
     submitPlanningText('hello');
 
     await waitFor(() => {
-      expect(vi.mocked(mock.api.planningChatSend)).toHaveBeenCalledWith({ turnId: expect.any(String), message: 'hello', presetKey: 'codex', confirmationMode: 'require' });
+      expect(vi.mocked(mock.api.planningChatSend)).toHaveBeenCalledWith({ turnId: expect.any(String), sessionId: 'session-1', message: 'hello', presetKey: 'codex', confirmationMode: 'require' });
       expect(screen.getByTestId('invoker-terminal-transcript')).toHaveTextContent('I can help draft that.');
     });
     expect(screen.queryByText(/Unknown command/)).not.toBeInTheDocument();
@@ -950,14 +954,13 @@ describe('Invoker terminal (component)', () => {
     fireEvent.click(await screen.findByTestId('invoker-terminal-cancel'));
     await waitFor(() => expect(mock.api.planningChatCancel).toHaveBeenCalledTimes(1));
     expect(mock.api.planningChatCancel).toHaveBeenCalledWith({
+      sessionId: 'session-1',
       turnId,
     });
 
-    // First-message turns stay on the local session id until send resolves;
-    // the cancel stream event must target that same view id.
     await act(async () => {
       mock.firePlanningChatStream({
-        sessionId: 'local-planning-session-1',
+        sessionId: 'session-1',
         turnId,
         turn: { status: 'failed', error: PLANNING_TURN_CANCELLED_MESSAGE },
       });
@@ -1079,6 +1082,24 @@ describe('Invoker terminal (component)', () => {
   });
 
   it('keeps live planning activity isolated when switching planning sessions', async () => {
+    let createdSessions = 0;
+    mock.api.planningChatCreate = vi.fn(async () => {
+      createdSessions += 1;
+      return {
+        ok: true as const,
+        session: {
+          id: `session-${createdSessions}`,
+          title: 'Untitled plan',
+          status: 'still_discussing' as const,
+          presetKey: 'codex',
+          confirmationMode: 'require' as const,
+          messages: [],
+          draftPlanAvailable: false,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      };
+    });
     mock.api.planningChatSend = vi.fn(() => new Promise(() => {}) as any) as any;
 
     render(<App />);
@@ -1265,12 +1286,13 @@ describe('Invoker terminal (component)', () => {
     render(<App />);
     await openPlanningTerminal();
 
+    fireEvent.change(screen.getByTestId('invoker-terminal-repo'), { target: { value: 'https://example.com/planning-repo.git' } });
     const input = screen.getByTestId('invoker-terminal-input');
     fireEvent.change(input, { target: { value: 'hello' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
     await waitFor(() => {
-      expect(vi.mocked(mock.api.planningChatSend)).toHaveBeenCalledWith({ turnId: expect.any(String), message: 'hello', presetKey: 'codex', confirmationMode: 'require' });
+      expect(vi.mocked(mock.api.planningChatSend)).toHaveBeenCalledWith({ turnId: expect.any(String), sessionId: 'session-1', message: 'hello', presetKey: 'codex', confirmationMode: 'require' });
     });
   });
 
@@ -1649,7 +1671,7 @@ describe('Invoker terminal (component)', () => {
     await waitFor(() => {
       expect(within(screen.getByTestId('planning-session-list')).queryByText('local unsaved planning chat')).not.toBeInTheDocument();
     });
-    expect(mock.api.planningChatDelete).not.toHaveBeenCalled();
+    expect(mock.api.planningChatDelete).toHaveBeenCalledWith({ sessionId: 'session-1' });
   });
 
   it('disables Clear submitted when there are no submitted planning chats', async () => {
@@ -1767,7 +1789,7 @@ describe('Invoker terminal (component)', () => {
     });
   });
 
-  it('shows a lost-session error instead of starting a fresh chat for local transcript continuation', async () => {
+  it('continues a failed first send on the repository session instead of opening a new chat', async () => {
     mock.api.planningChatSend = vi
       .fn()
       .mockResolvedValueOnce({
@@ -1792,12 +1814,15 @@ describe('Invoker terminal (component)', () => {
     submitPlanningText('continue without losing context');
 
     await waitFor(() => {
-      const transcript = screen.getByTestId('invoker-terminal-transcript');
-      expect(transcript).toHaveTextContent('This planning chat lost its server session.');
-      expect(transcript).toHaveTextContent('Start a new chat to continue planning.');
+      expect(mock.api.planningChatSend).toHaveBeenCalledTimes(2);
+      expect(mock.api.planningChatSend).toHaveBeenLastCalledWith(expect.objectContaining({
+        sessionId: 'session-1',
+        message: 'continue without losing context',
+      }));
     });
-    expect(mock.api.planningChatSend).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId('invoker-terminal-transcript')).not.toHaveTextContent('What do you want to build?');
+    const transcript = screen.getByTestId('invoker-terminal-transcript');
+    expect(transcript).toHaveTextContent('draft a plan that fails before a session exists');
+    expect(transcript).not.toHaveTextContent('This planning chat lost its server session.');
   });
 
   it('passes the selected planning preset', async () => {
@@ -1810,7 +1835,7 @@ describe('Invoker terminal (component)', () => {
     submitPlanningText('draft a plan');
 
     await waitFor(() => {
-      expect(vi.mocked(mock.api.planningChatSend)).toHaveBeenCalledWith({ turnId: expect.any(String), message: 'draft a plan', presetKey: 'omp+claude', confirmationMode: 'require' });
+      expect(vi.mocked(mock.api.planningChatSend)).toHaveBeenCalledWith({ turnId: expect.any(String), sessionId: 'session-1', message: 'draft a plan', presetKey: 'omp+claude', confirmationMode: 'require' });
     });
   });
 

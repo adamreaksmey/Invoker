@@ -774,9 +774,14 @@ export function isDraftingAuthorizedByTurn(message: string, messagesBeforeTurn: 
   return isDraftingAuthorized(message, normalizedMessages);
 }
 
+export const PLANNING_REPO_REQUIRED_ERROR = 'Choose a repository before planning. Invoker will not target a default checkout or an unspecified repo.';
+
 function planConversationConfig(
   preset: HarnessPreset,
-  deps: Pick<InAppPlannerDeps, 'config' | 'workingDir' | 'planningCommandBuilder' | 'executionAgentRegistry' | 'conversationRepo' | 'logger' | 'onRawPlannerOutput' | 'planDoctorScriptPath'> & { mcpConfigPath?: string },
+  deps: Pick<InAppPlannerDeps, 'config' | 'workingDir' | 'planningCommandBuilder' | 'executionAgentRegistry' | 'conversationRepo' | 'logger' | 'onRawPlannerOutput' | 'planDoctorScriptPath'> & {
+    mcpConfigPath?: string;
+    planningRepoUrl?: string;
+  },
   threadTs: string,
   selectHarnessSessionDriver: PlannerSurfacesModule['selectHarnessSessionDriver'],
   options: { conversationalPlanning?: boolean; draftingPreauthorized?: boolean } = {},
@@ -789,7 +794,7 @@ function planConversationConfig(
     workingDir: deps.workingDir,
     timeoutMs: (deps.config.planningTimeoutSeconds ?? 7200) * 1000,
     defaultBranch: deps.config.defaultBranch,
-    repoUrl: deps.config.defaultRepoUrl,
+    repoUrl: deps.planningRepoUrl,
     experimentalPlanner: deps.config.experimentalPlanner,
     conversationalPlanning: options.conversationalPlanning ?? false,
     planningSurface: options.conversationalPlanning ? 'in_app' : undefined,
@@ -851,7 +856,7 @@ async function createSession(
     resolveDefaultPlanningConfirmationMode(deps.config),
   );
 
-  const repoBinding = request?.repoBinding ?? resolvePlanningRepoBinding(deps.config);
+  const repoBinding = request?.repoBinding;
   let worktreeBinding:
     | { repoUrl: string; baseBranch: string; baseCommit: string; worktreePath: string; worktreeBranch: string }
     | undefined;
@@ -875,8 +880,12 @@ async function createSession(
         planDoctorScriptPath: deps.planDoctorScriptPath,
         workingDir: worktreeBinding.worktreePath,
         mcpConfigPath: planningMcpConfigPath(worktreeBinding.worktreePath),
+        planningRepoUrl: worktreeBinding.repoUrl,
       }
-    : deps;
+    : {
+        ...deps,
+        planningRepoUrl: repoBinding?.repoUrl,
+      };
 
   const session: InAppPlanningChatSession = {
     id,
@@ -886,8 +895,8 @@ async function createSession(
     status: 'still_discussing',
     messages: [],
     conversation: new PlanConversation(planConversationConfig(preset, conversationDeps, id, selectHarnessSessionDriver, { conversationalPlanning: true })),
-    repoUrl: worktreeBinding?.repoUrl,
-    baseBranch: worktreeBinding?.baseBranch,
+    repoUrl: worktreeBinding?.repoUrl ?? repoBinding?.repoUrl,
+    baseBranch: worktreeBinding?.baseBranch ?? repoBinding?.baseBranch,
     baseCommit: worktreeBinding?.baseCommit,
     worktreePath: worktreeBinding?.worktreePath,
     worktreeBranch: worktreeBinding?.worktreeBranch,
@@ -900,15 +909,6 @@ async function createSession(
   deps.sessions.set(session.id, session);
   persistPlanningSession(session, deps.planningSessionStore, false);
   return session;
-}
-
-export function resolvePlanningRepoBinding(config: InvokerConfig): InAppPlanningRepoBinding | undefined {
-  const repoUrl = config.defaultRepoUrl?.trim();
-  if (!repoUrl) return undefined;
-  const baseBranch = config.defaultBranch?.trim()
-    || detectDefaultBranchRemote(repoUrl)
-    || 'main';
-  return { repoUrl, baseBranch };
 }
 
 async function activatePlanningSessionWorktree(
@@ -930,6 +930,7 @@ async function activatePlanningSessionWorktree(
     ...deps,
     workingDir: provisioned.worktreePath,
     mcpConfigPath: planningMcpConfigPath(provisioned.worktreePath),
+    planningRepoUrl: session.repoUrl,
   };
 
   session.baseCommit = provisioned.baseCommit;
@@ -1639,9 +1640,10 @@ export async function submitPlanningChatDraft(
         }
         planText = approvedDraft.planText;
       }
-      const repositoryBinding = session.repoUrl && session.baseBranch
-        ? { repoUrl: session.repoUrl, baseBranch: session.baseBranch }
-        : undefined;
+      if (!session.repoUrl?.trim() || !session.baseBranch?.trim()) {
+        return { ok: false, error: PLANNING_REPO_REQUIRED_ERROR };
+      }
+      const repositoryBinding = { repoUrl: session.repoUrl, baseBranch: session.baseBranch };
       const approved = await submitPlanningReview({
         planText,
         loadPlan: repositoryBinding
@@ -1772,7 +1774,7 @@ export async function rebindPlanningChatRepo(
   }
   const repoPool = deps.repoPool;
 
-  const requestedRepoUrl = rawRequest?.repoUrl?.trim() || deps.config.defaultRepoUrl;
+  const requestedRepoUrl = rawRequest?.repoUrl?.trim();
   if (!requestedRepoUrl) {
     return { ok: false, error: 'No repository specified.' };
   }
@@ -1826,6 +1828,7 @@ export async function rebindPlanningChatRepo(
       planDoctorScriptPath: deps.planDoctorScriptPath,
       workingDir: provisioned.worktreePath,
       mcpConfigPath: planningMcpConfigPath(provisioned.worktreePath),
+      planningRepoUrl: requestedRepoUrl,
     };
     const conversation = new PlanConversation(planConversationConfig(
       preset,
@@ -1955,8 +1958,12 @@ export async function restorePlanningChatSessions(
           planDoctorScriptPath: deps.planDoctorScriptPath,
           workingDir: restoredWorktreePath,
           mcpConfigPath: planningMcpConfigPath(restoredWorktreePath),
+          planningRepoUrl: record.repoUrl,
         }
-      : deps;
+      : {
+          ...deps,
+          planningRepoUrl: record.repoUrl,
+        };
 
     const conversation = new PlanConversation(planConversationConfig(preset, conversationDeps, record.id, selectHarnessSessionDriver, { conversationalPlanning: true }));
     await conversation.init();

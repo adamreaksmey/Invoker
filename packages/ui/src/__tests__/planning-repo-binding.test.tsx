@@ -281,4 +281,16 @@ describe('planning composer repo binding', () => {
       expect(screen.getByTestId('planning-repo-status')).toHaveTextContent('No repository bound yet');
     });
   });
+
+  it('does not send a planning message until a repository is entered', async () => {
+    render(<App />);
+    await openComposerOptions();
+
+    fireEvent.change(screen.getByTestId('invoker-terminal-input'), { target: { value: 'hello planner' } });
+    fireEvent.submit(screen.getByTestId('invoker-terminal-input').closest('form')!);
+
+    expect(mock.api.planningChatCreate).not.toHaveBeenCalled();
+    expect(mock.api.planningChatSend).not.toHaveBeenCalled();
+    expect(screen.getByText('Choose a repository before planning. Invoker will not target a default checkout or an unspecified repo.')).toBeInTheDocument();
+  });
 });

@@ -139,9 +139,22 @@ describe('planning chat E2E acceptance: explore -> draft -> critique -> locked r
       });
       if (!created.ok) throw new Error(created.error);
       sessionId = created.session.id;
-
-      expect(created.session.repoUrl).toBe(REPO_A);
-      expect(created.session.baseCommit).toBe('sha-repo-a');
+      const bound = await rebindPlanningChatRepo({
+        sessionId,
+        repoUrl: REPO_A,
+        baseBranch: 'main',
+      }, {
+        config: { defaultRepoUrl: REPO_A, defaultBranch: 'main' },
+        loadGeneratedPlan,
+        sessions,
+        planningCommandBuilder,
+        isInstalled: () => true,
+        repoPool,
+        planningSessionStore: adapter,
+      });
+      expect(bound).toEqual({ ok: true, action: 'provision' });
+      expect(sessions.get(sessionId)?.repoUrl).toBe(REPO_A);
+      expect(sessions.get(sessionId)?.baseCommit).toBe('sha-repo-a');
 
       spawnPlanner.mockResolvedValueOnce(EXPLORE_REPLY);
       const exploreTurn = await sendPlanningChatMessage({

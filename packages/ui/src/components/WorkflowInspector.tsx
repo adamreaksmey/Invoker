@@ -325,7 +325,8 @@ export function WorkflowInspector({
   const [branchValue, setBranchValue] = useState(workflow?.baseBranch ?? '');
   const [taskLogEvents, setTaskLogEvents] = useState<TaskAuditEvent[]>([]);
   const [taskLogError, setTaskLogError] = useState<string | null>(null);
-  const [showLogs, setShowLogs] = useState(true);
+  const [showLogs, setShowLogs] = useState(false);
+  const [promptExpanded, setPromptExpanded] = useState(false);
   const [logLevelFilter, setLogLevelFilter] = useState<TaskLogLevel>('info');
   const [dismissedFixFailureKeys, setDismissedFixFailureKeys] = useState<Set<string>>(() => new Set());
 
@@ -775,6 +776,9 @@ export function WorkflowInspector({
                 ))}
               </select>
             </label>
+            <p data-testid="execution-agent-help" className="mt-2 text-[11px] leading-4 text-muted-foreground">
+              The coding program that executes this task, such as Codex or Claude. This is separate from the model. On a finished or failed task, a different agent starts a new run from the beginning.
+            </p>
           </section>
         )}
         {(task?.config.prompt || task?.config.isMergeNode) && onEditModel && (
@@ -794,6 +798,9 @@ export function WorkflowInspector({
                 ))}
               </select>
             </label>
+            <p data-testid="execution-model-help" className="mt-2 text-[11px] leading-4 text-muted-foreground">
+              The model id sent to that program. Default lets the program choose its own model. On a finished or failed task, a different model starts a new run from the beginning.
+            </p>
           </section>
         )}
 
@@ -931,7 +938,12 @@ export function WorkflowInspector({
                 data-sidebar-nav-order="20"
                 tabIndex={0}
               >
-                <div data-testid="prompt-command-display" onClick={startEditingPromptOrCommand} onDoubleClick={startEditingPromptOrCommand}>
+                <div
+                  data-testid="prompt-command-display"
+                  onClick={startEditingPromptOrCommand}
+                  onDoubleClick={startEditingPromptOrCommand}
+                  className={!promptExpanded && ((task?.config.prompt?.length ?? task?.config.command?.length ?? 0) > 280) ? 'max-h-24 overflow-hidden' : undefined}
+                >
                   {hasPrompt ? (
                     <p className="whitespace-pre-wrap break-words text-foreground">{task?.config.prompt}</p>
                   ) : (
@@ -939,6 +951,16 @@ export function WorkflowInspector({
                   )}
                 </div>
               </div>
+            )}
+            {!isEditingPrompt && !isEditingCommand && ((task?.config.prompt?.length ?? task?.config.command?.length ?? 0) > 280) && (
+              <button
+                type="button"
+                data-testid="prompt-expand-toggle"
+                onClick={() => setPromptExpanded((expanded) => !expanded)}
+                className="mt-2 text-[11px] text-muted-foreground hover:text-foreground"
+              >
+                {promptExpanded ? 'Show less' : 'Show full prompt'}
+              </button>
             )}
           </section>
         )}

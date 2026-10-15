@@ -98,6 +98,8 @@ export function makePlanningSessionSummary(
     ],
     draftPlanAvailable: true,
     draftPlanSummary: { name: 'Saved plan', taskCount: 1, steps: ['Update README'] },
+    repoUrl: 'https://example.com/planning-repo.git',
+    baseBranch: 'main',
     createdAt: '2026-07-07T00:00:00.000Z',
     updatedAt: '2026-07-07T00:00:02.000Z',
     ...overrides,

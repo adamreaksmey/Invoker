@@ -3019,10 +3019,21 @@ export function App() {
     const input = planningInput.trim();
     if (!input || activePlanningSessionBusy || activePlanningReadOnly) return;
 
+    const liveSession = planningSessionsRef.current.find((session) => session.id === activePlanningSessionIdRef.current);
+    const pendingRepoInput = (liveSession?.repoInput ?? activePlanningSession.repoInput ?? '').trim();
+    const boundRepoUrl = (liveSession?.repoUrl ?? activePlanningSession.repoUrl ?? '').trim();
+    if (!boundRepoUrl && !pendingRepoInput) {
+      appendTerminalLine(
+        'Choose a repository before planning. Invoker will not target a default checkout or an unspecified repo.',
+        'system',
+        'error',
+      );
+      return;
+    }
+
     let sendSessionId = planningSessionId;
     let activeViewId = activePlanningSessionId;
     let explicitRepoBindingApplied = false;
-    const pendingRepoInput = (activePlanningSession.repoInput ?? '').trim();
     if (!activePlanningRepoLocked && pendingRepoInput && pendingRepoInput !== (activePlanningSession.repoUrl ?? '')) {
       const bind = await commitPlanningRepo();
       if (!bind.ok) return;
@@ -3045,6 +3056,7 @@ export function App() {
           'Create or submit a plan before starting ready work.',
           'system',
           'error',
+          activeViewId,
         );
         return;
       }

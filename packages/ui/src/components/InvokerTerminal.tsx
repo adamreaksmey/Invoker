@@ -925,7 +925,8 @@ export function InvokerTerminal({
   };
 
   const composerDisabledCursorClass = busy || readOnly ? 'disabled:cursor-not-allowed' : '';
-  const sendButtonDisabled = busy || binding || readOnly || !value.trim();
+  const repoMissing = !repoLocked && !repoValue.trim();
+  const sendButtonDisabled = busy || binding || readOnly || !value.trim() || repoMissing;
   const sendButtonDisabledCursorClass = 'disabled:cursor-not-allowed';
   const harnessChoices = useMemo(() => buildPlanningHarnessChoices(presetOptions), [presetOptions]);
   const hasPlanningTools = harnessChoices.length > 0;
@@ -1275,6 +1276,33 @@ export function InvokerTerminal({
               />
               <div className="mt-1 flex flex-wrap items-center justify-between gap-3 pt-2">
                 <div>
+                  {!repoLocked && (
+                    <label className="mr-3 text-xs text-muted-foreground">
+                      Repository
+                      <input
+                        data-testid="invoker-terminal-repo"
+                        list="invoker-terminal-repo-suggestions"
+                        value={repoValue}
+                        disabled={readOnly || binding}
+                        placeholder="path or git URL"
+                        onChange={(event) => onRepoInputChange?.(event.target.value)}
+                        onBlur={() => onRepoCommit?.()}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            onRepoCommit?.();
+                          }
+                        }}
+                        className="ml-2 w-56 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground outline-none hover:border-border-strong focus:border-ring"
+                      />
+                      <datalist id="invoker-terminal-repo-suggestions">
+                        {repoSuggestions.map((repo) => <option key={repo} value={repo} />)}
+                      </datalist>
+                      {repoMissing && (
+                        <span className="ml-2 text-[11px] text-muted-foreground">Required before planning</span>
+                      )}
+                    </label>
+                  )}
                   <button
                     type="button"
                     aria-expanded={showComposerOptions}
@@ -1368,30 +1396,6 @@ export function InvokerTerminal({
                           <option value="require">Ask first</option>
                         </select>
                       </label>
-                      {!repoLocked && (
-                        <label className="text-xs text-muted-foreground">
-                          Repo
-                          <input
-                            data-testid="invoker-terminal-repo"
-                            list="invoker-terminal-repo-suggestions"
-                            value={repoValue}
-                            disabled={readOnly || binding}
-                            placeholder="path or URL (default if empty)"
-                            onChange={(event) => onRepoInputChange?.(event.target.value)}
-                            onBlur={() => onRepoCommit?.()}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter') {
-                                event.preventDefault();
-                                onRepoCommit?.();
-                              }
-                            }}
-                            className="ml-2 w-56 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground outline-none hover:border-border-strong focus:border-ring"
-                          />
-                          <datalist id="invoker-terminal-repo-suggestions">
-                            {repoSuggestions.map((repo) => <option key={repo} value={repo} />)}
-                          </datalist>
-                        </label>
-                      )}
                       {repoError && !repoLocked && (
                         <span data-testid="invoker-terminal-repo-error" className="text-xs text-red-400">{repoError}</span>
                       )}

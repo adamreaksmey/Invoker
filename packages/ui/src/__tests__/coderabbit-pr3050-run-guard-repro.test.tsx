@@ -47,6 +47,10 @@ describe('CodeRabbit PR #3050 — submitted planning stays read-only after start
     render(<App />);
     await openPlanningTerminal();
 
+    const repoInput = screen.queryByTestId('invoker-terminal-repo') as HTMLInputElement | null;
+    if (repoInput && !repoInput.value) {
+      fireEvent.change(repoInput, { target: { value: 'https://example.com/planning-repo.git' } });
+    }
     fireEvent.change(screen.getByTestId('invoker-terminal-input'), { target: { value: 'draft the full plan' } });
     fireEvent.submit(screen.getByTestId('invoker-terminal-input').closest('form')!);
     await screen.findByTestId('planning-create-workflow');

@@ -43,6 +43,10 @@ describe('planning draft submit -> new turn live planner stream repro', () => {
   }
 
   function submitPlanningText(text: string) {
+    const repoInput = screen.queryByTestId('invoker-terminal-repo') as HTMLInputElement | null;
+    if (repoInput && !repoInput.value) {
+      fireEvent.change(repoInput, { target: { value: 'https://example.com/planning-repo.git' } });
+    }
     fireEvent.change(screen.getByTestId('invoker-terminal-input'), { target: { value: text } });
     fireEvent.submit(screen.getByTestId('invoker-terminal-input').closest('form')!);
   }
@@ -70,6 +74,25 @@ describe('planning draft submit -> new turn live planner stream repro', () => {
       workflowId: 'wf-1',
     })) as any;
 
+    let createdSessions = 0;
+    mock.api.planningChatCreate = vi.fn(async () => {
+      createdSessions += 1;
+      return {
+        ok: true as const,
+        session: {
+          id: `session-${createdSessions}`,
+          title: 'Untitled plan',
+          status: 'still_discussing' as const,
+          presetKey: 'codex',
+          confirmationMode: 'require' as const,
+          messages: [],
+          draftPlanAvailable: false,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      };
+    });
+
     render(<App />);
     await openPlanningTerminal();
 
@@ -95,6 +118,7 @@ describe('planning draft submit -> new turn live planner stream repro', () => {
       expect(mock.api.planningChatSend).toHaveBeenCalledTimes(2);
       expect(mock.api.planningChatSend).toHaveBeenLastCalledWith({
         turnId: expect.any(String),
+        sessionId: 'session-2',
         message: 'draft the next plan',
         presetKey: 'codex',
         confirmationMode: 'require',
