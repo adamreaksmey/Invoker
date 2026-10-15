@@ -1495,25 +1495,6 @@ export function App() {
     return () => clearTimeout(timer);
   }, [selectedWorkflowId, selectedWorkflowPresent]);
 
-  useEffect(() => {
-    if (selectedTask?.config.workflowId) {
-      setWorkflowSelectionDismissed(false);
-      setSelectedWorkflowId(selectedTask.config.workflowId);
-      return;
-    }
-    if (selectedWorkflowId && (workflows.has(selectedWorkflowId) || selectedWorkflowTaskCount > 0)) {
-      return;
-    }
-    if (workflowSelectionDismissed) {
-      return;
-    }
-    if (selectedWorkflowId && !selectedWorkflowVanished) {
-      return;
-    }
-    const firstWorkflowId = workflows.keys().next().value as string | undefined;
-    setSelectedWorkflowId(firstWorkflowId ?? null);
-  }, [selectedTask, selectedWorkflowId, selectedWorkflowTaskCount, selectedWorkflowVanished, workflowSelectionDismissed, workflows]);
-
   const handleStatusClick = useCallback((filterKey: WorkflowStatus, event: React.MouseEvent) => {
     setStatusFilters(prev => {
       if (event.ctrlKey || event.metaKey) {
@@ -1551,6 +1532,27 @@ export function App() {
     () => getAttentionTaskEntries(tasks, workflows, attentionTaskIdsWithFailures),
     [tasks, workflows, attentionTaskIdsWithFailures],
   );
+  useEffect(() => {
+    if (selectedTask?.config.workflowId) {
+      setWorkflowSelectionDismissed(false);
+      setSelectedWorkflowId(selectedTask.config.workflowId);
+      return;
+    }
+    if (sidebarSurface === 'attention' && attentionEntries.length === 0) {
+      return;
+    }
+    if (selectedWorkflowId && (workflows.has(selectedWorkflowId) || selectedWorkflowTaskCount > 0)) {
+      return;
+    }
+    if (workflowSelectionDismissed) {
+      return;
+    }
+    if (selectedWorkflowId && !selectedWorkflowVanished) {
+      return;
+    }
+    const firstWorkflowId = workflows.keys().next().value as string | undefined;
+    setSelectedWorkflowId(firstWorkflowId ?? null);
+  }, [attentionEntries.length, selectedTask, selectedWorkflowId, selectedWorkflowTaskCount, selectedWorkflowVanished, sidebarSurface, workflowSelectionDismissed, workflows]);
   const runningEntries = useMemo(() => getRunningTaskEntries(tasks, workflows, queueStatus), [tasks, workflows, queueStatus]);
   const runningWorkflowCount = useMemo(() => {
     const workflowIds = new Set<string>();
@@ -2081,10 +2083,8 @@ export function App() {
 
     if (sidebarSurface === 'attention') {
       if (!attentionEntries.length) {
-        if (selectedTaskId !== null || selectedWorkflowId !== null) {
+        if (selectedTaskId !== null) {
           setSelectedTaskId(null);
-          setSelectedWorkflowId(null);
-          setWorkflowSelectionDismissed(false);
         }
         return;
       }
