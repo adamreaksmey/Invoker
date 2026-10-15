@@ -100,4 +100,41 @@ describe('TaskDAG status filters', () => {
     });
     expect(edge.getAttribute('data-label')).not.toContain('wf-alpha');
   });
+
+  it('shows layer and feature-state pills plus the selected task summary', async () => {
+    const description = [
+      'Check ephemeral handoff artifacts',
+      'Layer: docs',
+      'Feature state: active',
+      'Review claim: Artifacts stay out of the repo',
+    ].join('\n');
+    const task = makeUITask({
+      id: 'wf-1/scrub-handoff-artifacts',
+      workflowId: 'wf-1',
+      status: 'completed',
+      description,
+      prompt: 'Check the completed handoff for ephemeral inter-task artifacts.',
+    });
+    const tasks = new Map<string, TaskState>([[task.id, task]]);
+    const workflows = new Map<string, WorkflowMeta>([
+      ['wf-1', { id: 'wf-1', name: 'Vue todo', status: 'review_ready' }],
+    ]);
+
+    render(
+      <TaskDAG
+        tasks={tasks}
+        workflows={workflows}
+        selectedTaskId={task.id}
+      />,
+    );
+
+    await screen.findByTestId(`rf__node-${task.id}`);
+    expect(screen.getAllByText('docs').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('active').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Check ephemeral handoff artifacts').length).toBeGreaterThan(0);
+    expect(screen.getByTestId('task-graph-selection-summary')).toHaveTextContent('Artifacts stay out of the repo');
+    expect(screen.getByTestId('task-graph-selection-summary')).toHaveTextContent(
+      'Check the completed handoff for ephemeral inter-task artifacts.',
+    );
+  });
 });

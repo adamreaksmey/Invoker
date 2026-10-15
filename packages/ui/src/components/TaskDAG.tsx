@@ -28,6 +28,7 @@ import { getEdgeStyle, getEffectiveVisualStatus, matchesStatusFilter } from '../
 import { TaskNode, isTaskNodeActionable } from './TaskNode.js';
 import { BundledEdge, type BundledEdgeData } from './BundledEdge.js';
 import { MergeGateNode } from './MergeGateNode.js';
+import { TaskGraphSelectionSummary } from './TaskGraphSelectionSummary.js';
 import {
   isMergeGateId,
   groupTasksByWorkflow,
@@ -686,17 +687,19 @@ function TaskDAGInner({ tasks, workflows, selectedTaskId, cameraCommand, onTaskC
   }
 
   const browserHeight = surfaceMode === 'browser' ? '300px' : '100%';
+  const selectedTask = selectedTaskId ? tasks.get(selectedTaskId) : undefined;
 
   return (
     <div
       ref={graphRootRef}
-      className="flex min-h-0 w-full flex-1 overflow-hidden"
+      className="flex min-h-0 w-full flex-1 flex-col overflow-hidden"
       style={{ height: browserHeight }}
     >
+      <div className="min-h-0 flex-1">
       <ReactFlow
         key={flowInstanceKey}
         className="h-full w-full"
-        style={{ width: '100%', height: browserHeight }}
+        style={{ width: '100%', height: '100%' }}
         nodes={rfNodes}
         edges={edges}
         nodeTypes={nodeTypes}
@@ -725,6 +728,8 @@ function TaskDAGInner({ tasks, workflows, selectedTaskId, cameraCommand, onTaskC
           }}
         />
       </ReactFlow>
+      </div>
+      {selectedTask ? <TaskGraphSelectionSummary task={selectedTask} /> : null}
     </div>
   );
 }

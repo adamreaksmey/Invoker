@@ -1,2 +1,2 @@
-export const TASK_GRAPH_NODE_WIDTH = 248;
-export const TASK_GRAPH_NODE_HEIGHT = 96;
+export const TASK_GRAPH_NODE_WIDTH = 220;
+export const TASK_GRAPH_NODE_HEIGHT = 112;
