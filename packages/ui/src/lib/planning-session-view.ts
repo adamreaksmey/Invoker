@@ -1,8 +1,9 @@
-import type {
-  InAppPlanningSessionStatus,
-  InAppPlanningSessionSummary,
-  PlanningConfirmationMode,
-  TerminalSessionDescriptor,
+import {
+  planningRepoLabel,
+  type InAppPlanningSessionStatus,
+  type InAppPlanningSessionSummary,
+  type PlanningConfirmationMode,
+  type TerminalSessionDescriptor,
 } from '@invoker/contracts';
 import type { InvokerTerminalLine, PlanningTerminalMode } from '../components/InvokerTerminal.js';
 
@@ -18,6 +19,7 @@ export type PlanningSessionView = Omit<InAppPlanningSessionSummary, 'messages'> 
   repoInput?: string;
   baseBranchInput?: string;
   repoError?: string | null;
+  repoNotice?: string | null;
 };
 
 export function planningSessionFromSummary(
@@ -130,6 +132,7 @@ export function reconcileHydratedPlanningSessions(
       repoInput: session.repoInput,
       baseBranchInput: session.baseBranchInput,
       repoError: session.repoError,
+      repoNotice: session.repoNotice,
     };
   });
   const newRestoredSessions = restoredSessions.filter((session) => !currentIds.has(session.id));
@@ -152,12 +155,6 @@ export function maxPlanningMessageId(sessions: PlanningSessionView[]): number {
 
 export function planningNeedsAttention(status: InAppPlanningSessionStatus): boolean {
   return status === 'waiting_for_answer' || status === 'draft_ready' || status === 'planner_error';
-}
-
-export function planningRepoLabel(repoUrl: string): string {
-  const trimmed = repoUrl.trim().replace(/\.git$/, '');
-  const segments = trimmed.split(/[/:]/).filter(Boolean);
-  return segments.length >= 2 ? segments.slice(-2).join('/') : (segments.at(-1) ?? trimmed);
 }
 
 export function planningRepoStatusText(repoUrl: string | undefined, baseCommit: string | undefined): string {

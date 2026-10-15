@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { Terminal as XTermTerminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
-import type { TerminalSessionDescriptor } from '@invoker/contracts';
+import { PLANNING_CLONE_IN_PROGRESS, type TerminalSessionDescriptor } from '@invoker/contracts';
 import type { PlanningConfirmationMode } from '@invoker/contracts';
 import {
   collapsePlanningChatLines,
@@ -181,6 +181,7 @@ interface InvokerTerminalProps {
   repoLocked?: boolean;
   repoSuggestions?: string[];
   repoError?: string | null;
+  repoNotice?: string | null;
   turnError?: string | null;
   onRetryTurn?: () => void;
   onCancelTurn?: () => void;
@@ -391,9 +392,10 @@ function SystemErrorBanner({
   );
 }
 
-function SystemNotice({ text }: { text: string }): JSX.Element {
+function SystemNotice({ text, tone }: { text: string; tone?: 'muted' | 'error' | 'success' }): JSX.Element {
+  const toneClass = tone === 'success' ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground';
   return (
-    <div className="max-w-[85%] text-[13px] leading-5 text-muted-foreground" data-testid="invoker-terminal-system-notice">
+    <div className={`max-w-[85%] text-[13px] leading-5 ${toneClass}`} data-testid="invoker-terminal-system-notice">
       <div className="whitespace-pre-wrap font-sans">{text}</div>
     </div>
   );
@@ -441,7 +443,7 @@ function renderCollapsedLine(
       />
     );
   }
-  return <SystemNotice key={item.id} text={item.text} />;
+  return <SystemNotice key={item.id} text={item.text} tone={item.tone} />;
 }
 
 type SeededOutputSnapshot = {
@@ -813,6 +815,7 @@ export function InvokerTerminal({
   repoLocked = true,
   repoSuggestions = [],
   repoError = null,
+  repoNotice = null,
   turnError = null,
   onRetryTurn,
   onCancelTurn,
@@ -1325,6 +1328,16 @@ export function InvokerTerminal({
                       </label>
                       {repoMissing && (
                         <span className="text-[11px] text-muted-foreground">Required before planning</span>
+                      )}
+                      {binding && (
+                        <span className="basis-full text-xs text-muted-foreground" data-testid="invoker-terminal-clone-status">
+                          {PLANNING_CLONE_IN_PROGRESS}
+                        </span>
+                      )}
+                      {!binding && repoNotice && !repoError && (
+                        <span className="basis-full text-xs text-emerald-600 dark:text-emerald-400" data-testid="invoker-terminal-clone-status">
+                          {repoNotice}
+                        </span>
                       )}
                       {repoError && (
                         <span className="basis-full text-xs text-red-400" data-testid="invoker-terminal-repo-error">

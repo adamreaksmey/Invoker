@@ -70,6 +70,11 @@ import {
   summarizePlanText,
   type PlanningMessage,
 } from '@invoker/planning-core';
+import {
+  PLANNING_CLONE_FAILED_PREFIX,
+  PLANNING_CLONE_FINISHED_BIND_FAILED_PREFIX,
+  planningCloneReadyText,
+} from '@invoker/contracts';
 import { detectDefaultBranchRemote } from '@invoker/workflow-core';
 import type { HarnessPreset, PlanConversation, PlanConversationConfig, PlanningCommandBuilder } from '@invoker/surfaces';
 import { isPlanningTurnCancelledError } from '@invoker/surfaces';
@@ -1803,8 +1808,10 @@ export async function rebindPlanningChatRepo(
     return { ok: false, error: requestedBaseBranch.error };
   }
 
+  let cloneFinished = false;
   try {
     await repoPool.ensureCloneThroughRepoQueue(requestedRepoUrl);
+    cloneFinished = true;
     const requestedHeadSha = await repoPool.resolveBaseCommit(requestedRepoUrl, requestedBaseBranch);
 
     const decision = decideWorktreeBinding({
@@ -1816,7 +1823,7 @@ export async function rebindPlanningChatRepo(
     });
 
     if (decision.action === 'reuse') {
-      return { ok: true, action: 'reuse' };
+      return { ok: true, action: 'reuse', baseBranch: requestedBaseBranch };
     }
 
     if (session.repoUrl && session.baseCommit && session.worktreePath) {
@@ -1840,7 +1847,8 @@ export async function rebindPlanningChatRepo(
     const presets = await resolveHarnessPresets(deps.config);
     const preset = presets[session.presetKey];
     if (!preset) {
-      return { ok: false, error: `Unknown planner preset "${session.presetKey}".` };
+      const message = `Unknown planner preset "${session.presetKey}".`;
+      return { ok: false, error: `${PLANNING_CLONE_FINISHED_BIND_FAILED_PREFIX}${message}` };
     }
     const { PlanConversation, selectHarnessSessionDriver } = await loadPlannerSurfaces();
     const conversationDeps = {
@@ -1865,6 +1873,12 @@ export async function rebindPlanningChatRepo(
     session.worktreePath = provisioned.worktreePath;
     session.worktreeBranch = provisioned.branch;
     session.conversation = conversation;
+    appendSessionMessage(
+      session,
+      'system',
+      planningCloneReadyText(requestedRepoUrl, requestedBaseBranch, decision.action),
+      'success',
+    );
 
     if (decision.action === 'invalidate_and_block_submit') {
       session.conversation.discardApprovedPlanningDraft();
@@ -1884,10 +1898,16 @@ export async function rebindPlanningChatRepo(
     }
 
     persistPlanningSession(session, deps.planningSessionStore, false);
-    return { ok: true, action: decision.action };
+    return { ok: true, action: decision.action, baseBranch: requestedBaseBranch };
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    return planningRebindFailure(cloneFinished, error);
   }
+}
+
+function planningRebindFailure(cloneFinished: boolean, error: unknown): { ok: false; error: string } {
+  const message = error instanceof Error ? error.message : String(error);
+  const prefix = cloneFinished ? PLANNING_CLONE_FINISHED_BIND_FAILED_PREFIX : PLANNING_CLONE_FAILED_PREFIX;
+  return { ok: false, error: `${prefix}${message}` };
 }
 
 export interface PlanningChatTerminalStatePatch {

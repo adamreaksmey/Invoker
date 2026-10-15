@@ -57,6 +57,8 @@ describe('planning composer repo binding', () => {
     await waitFor(() => {
       expect(screen.getByTestId('planning-repo-status')).toHaveTextContent('tmp/repo-a');
     });
+    expect(screen.getByTestId('invoker-terminal-clone-status')).toHaveTextContent('Cloned tmp/repo-a on main.');
+    expect(screen.getAllByText('Cloned tmp/repo-a on main.').length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByTestId('invoker-terminal-repo-error')).not.toBeInTheDocument();
   });
 
@@ -141,8 +143,8 @@ describe('planning composer repo binding', () => {
   });
 
   it('shows the send spinner and defers the send while a send-triggered bind is in flight', async () => {
-    let resolveRebind!: (value: { ok: true; action: 'provision' }) => void;
-    mock.api.planningChatRebindRepo = vi.fn(() => new Promise<{ ok: true; action: 'provision' }>((resolve) => {
+    let resolveRebind!: (value: { ok: true; action: 'provision'; baseBranch: string }) => void;
+    mock.api.planningChatRebindRepo = vi.fn(() => new Promise<{ ok: true; action: 'provision'; baseBranch: string }>((resolve) => {
       resolveRebind = resolve;
     }));
 
@@ -163,7 +165,7 @@ describe('planning composer repo binding', () => {
     expect(screen.getByTestId('invoker-terminal-input')).toBeDisabled();
     expect(mock.api.planningChatSend).not.toHaveBeenCalled();
 
-    resolveRebind({ ok: true, action: 'provision' });
+    resolveRebind({ ok: true, action: 'provision', baseBranch: 'main' });
 
     await waitFor(() => {
       expect(mock.api.planningChatSend).toHaveBeenCalledTimes(1);
@@ -171,8 +173,8 @@ describe('planning composer repo binding', () => {
   });
 
   it('shows the send spinner during a blur-committed bind without sending', async () => {
-    let resolveRebind!: (value: { ok: true; action: 'provision' }) => void;
-    mock.api.planningChatRebindRepo = vi.fn(() => new Promise<{ ok: true; action: 'provision' }>((resolve) => {
+    let resolveRebind!: (value: { ok: true; action: 'provision'; baseBranch: string }) => void;
+    mock.api.planningChatRebindRepo = vi.fn(() => new Promise<{ ok: true; action: 'provision'; baseBranch: string }>((resolve) => {
       resolveRebind = resolve;
     }));
 
@@ -186,12 +188,14 @@ describe('planning composer repo binding', () => {
     await waitFor(() => {
       expect(screen.getByTestId('invoker-terminal-send-spinner')).toBeInTheDocument();
     });
+    expect(screen.getByTestId('invoker-terminal-clone-status')).toHaveTextContent('Cloning repository…');
 
-    resolveRebind({ ok: true, action: 'provision' });
+    resolveRebind({ ok: true, action: 'provision', baseBranch: 'main' });
 
     await waitFor(() => {
       expect(screen.queryByTestId('invoker-terminal-send-spinner')).not.toBeInTheDocument();
     });
+    expect(screen.getByTestId('invoker-terminal-clone-status')).toHaveTextContent('Cloned tmp/repo-a on main.');
     expect(mock.api.planningChatSend).not.toHaveBeenCalled();
   });
 

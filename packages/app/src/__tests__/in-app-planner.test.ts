@@ -2402,7 +2402,7 @@ describe('planning chat worktree provisioning', () => {
       repoUrl: 'https://example.com/repo.git',
       baseBranch: 'main',
     }, deps);
-    expect(rebound).toEqual({ ok: true, action: 'provision' });
+    expect(rebound).toEqual({ ok: true, action: 'provision', baseBranch: 'main' });
 
     const expectedBranch = `invoker/planning/${sessionId}`;
     expect(repoPool.ensureCloneThroughRepoQueue).toHaveBeenCalledWith('https://example.com/repo.git');
@@ -2740,7 +2740,7 @@ describe('rebindPlanningChatRepo', () => {
       repoPool,
     });
 
-    expect(result).toEqual({ ok: true, action: 'reuse' });
+    expect(result).toEqual({ ok: true, action: 'reuse', baseBranch: 'main' });
     expect(repoPool.acquireWorktree).not.toHaveBeenCalled();
     const stored = sessions.get(session.id);
     expect(stored?.repoUrl).toBe('https://example.com/repo.git');
@@ -2775,6 +2775,64 @@ describe('rebindPlanningChatRepo', () => {
     expect(result.ok).toBe(true);
     expect(repoPool.resolveBaseCommit).toHaveBeenCalledWith('https://example.com/repo.git', 'master');
     expect(sessions.get(session.id)?.baseBranch).toBe('master');
+    expect(sessions.get(session.id)?.messages.at(-1)?.text).toBe('Cloned example.com/repo on master.');
+  });
+
+  it('says the clone failed when the repository cannot be cloned', async () => {
+    const repoPool = createFakeRebindRepoPool('/fake/worktree/clone-failed', 'sha-unused');
+    repoPool.ensureCloneThroughRepoQueue = vi.fn(async () => {
+      throw new Error('permission denied');
+    });
+    const sessions = createInAppPlanningChatSessions();
+    const session = planningSession({
+      id: 'clone-failed-session',
+      title: 'Clone failed',
+      repoUrl: undefined,
+      baseBranch: undefined,
+    });
+    sessions.set(session.id, session);
+
+    const result = await rebindPlanningChatRepo({
+      sessionId: session.id,
+      repoUrl: 'https://example.com/repo.git',
+      baseBranch: 'master',
+    }, {
+      config: { defaultBranch: 'main' },
+      sessions,
+      repoPool,
+    });
+
+    expect(result).toEqual({ ok: false, error: 'Clone failed: permission denied' });
+  });
+
+  it('says the clone finished when a later bind step fails', async () => {
+    const repoPool = createFakeRebindRepoPool('/fake/worktree/branch-missing', 'sha-unused');
+    repoPool.resolveBaseCommit = vi.fn(async () => {
+      throw new Error('Base branch "main" was not found on the remote origin');
+    });
+    const sessions = createInAppPlanningChatSessions();
+    const session = planningSession({
+      id: 'branch-missing-session',
+      title: 'Branch missing',
+      repoUrl: undefined,
+      baseBranch: undefined,
+    });
+    sessions.set(session.id, session);
+
+    const result = await rebindPlanningChatRepo({
+      sessionId: session.id,
+      repoUrl: 'https://example.com/repo.git',
+      baseBranch: 'main',
+    }, {
+      config: {},
+      sessions,
+      repoPool,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: 'Clone finished, but binding failed: Base branch "main" was not found on the remote origin',
+    });
   });
 
   it('provisions a new worktree and constructs a fresh conversation when there is no prior binding', async () => {
@@ -2798,7 +2856,7 @@ describe('rebindPlanningChatRepo', () => {
       repoPool,
     });
 
-    expect(result).toEqual({ ok: true, action: 'provision' });
+    expect(result).toEqual({ ok: true, action: 'provision', baseBranch: 'main' });
     expect(repoPool.acquireWorktree).toHaveBeenCalledWith(
       'https://example.com/new-repo.git',
       'invoker/planning/provision-session',
@@ -2836,7 +2894,7 @@ describe('rebindPlanningChatRepo', () => {
         repoPool,
       });
 
-      expect(result).toEqual({ ok: true, action: 'provision' });
+      expect(result).toEqual({ ok: true, action: 'provision', baseBranch: 'main' });
       const mcpConfigPath = join(worktreePath, '.mcp.json');
       expect(existsSync(mcpConfigPath)).toBe(true);
       const parsed = JSON.parse(readFileSync(mcpConfigPath, 'utf8'));
@@ -2901,7 +2959,7 @@ describe('rebindPlanningChatRepo', () => {
         repoPool,
       });
 
-      expect(result).toEqual({ ok: true, action: 'invalidate_and_block_submit' });
+      expect(result).toEqual({ ok: true, action: 'invalidate_and_block_submit', baseBranch: 'main' });
       const stored = sessions.get(sessionId);
       expect(stored?.draftPlanText).toBeUndefined();
       expect(stored?.draftPlanSummary).toBeUndefined();
@@ -3105,7 +3163,7 @@ describe('rebindPlanningChatRepo', () => {
       repoPool,
     });
 
-    expect(result).toEqual({ ok: true, action: 'provision' });
+    expect(result).toEqual({ ok: true, action: 'provision', baseBranch: 'main' });
     const stored = sessions.get(session.id);
     expect(stored?.repoUrl).toBe('https://example.com/other-repo.git');
     expect(stored?.baseCommit).toBe('new-head-sha');
@@ -3131,7 +3189,7 @@ describe('rebindPlanningChatRepo', () => {
       planningCommandBuilder,
     });
 
-    expect(result).toEqual({ ok: true, action: 'provision' });
+    expect(result).toEqual({ ok: true, action: 'provision', baseBranch: 'main' });
     const stored = sessions.get(session.id);
     // Without the builder the conversation falls back to spawning the literal
     // `agent` CLI, which does not exist on headless hosts.

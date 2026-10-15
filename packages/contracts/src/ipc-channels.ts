@@ -655,7 +655,11 @@ export interface InAppPlanningRebindRepoRequest {
 }
 
 export type InAppPlanningRebindRepoResponse =
-  | { ok: true; action: 'reuse' | 'provision' | 'invalidate_and_block_submit' }
+  | {
+      ok: true;
+      action: 'reuse' | 'provision' | 'invalidate_and_block_submit';
+      baseBranch: string;
+    }
   | { ok: false; error: string };
 
 

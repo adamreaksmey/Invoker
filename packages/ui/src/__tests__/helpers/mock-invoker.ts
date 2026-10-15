@@ -241,7 +241,7 @@ export function createMockInvoker(
       return () => { planningChatStreamCallbacks.delete(cb); };
     }),
     planningChatSetTerminalMode: vi.fn(async () => ({ ok: true })),
-    planningChatRebindRepo: vi.fn(async () => ({ ok: true, action: 'provision' })),
+    planningChatRebindRepo: vi.fn(async () => ({ ok: true as const, action: 'provision' as const, baseBranch: 'main' })),
     planningTerminalOpen: vi.fn(async (planningSessionId: string) => ({
       opened: true,
       session: {

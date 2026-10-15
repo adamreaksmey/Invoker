@@ -152,7 +152,7 @@ describe('planning chat E2E acceptance: explore -> draft -> critique -> locked r
         repoPool,
         planningSessionStore: adapter,
       });
-      expect(bound).toEqual({ ok: true, action: 'provision' });
+      expect(bound).toEqual({ ok: true, action: 'provision', baseBranch: 'main' });
       expect(sessions.get(sessionId)?.repoUrl).toBe(REPO_A);
       expect(sessions.get(sessionId)?.baseCommit).toBe('sha-repo-a');
 

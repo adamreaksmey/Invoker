@@ -12,6 +12,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef, useLayoutEffect, type MouseEvent as ReactMouseEvent, type RefObject } from 'react';
 import yaml from 'js-yaml';
 import type { ActionGraphNode, CursorModelDiscoverySummary, ExecutionDefaults, ExecutionHarnessOption, InAppPlanningChatResponse, InAppPlanningSessionStatus, InAppPlanningSessionSummary, InAppPlanningTurnOutcome, InvokerSetupRequest, InvokerSetupResult, PlanningConfirmationMode, PlanningPresetOption, PlanningPresetsResponse, ReviewGateQueryResponse, RuntimeStatus, StartReadyRequest, StartReadyResult, TerminalOutputEvent, TerminalSessionDescriptor, WorkflowMutationFailedEvent } from '@invoker/contracts';
+import { planningBindFailureLine, planningCloneReadyText } from '@invoker/contracts';
 import { resolvePlanningSubmitAction } from '@invoker/contracts/planning-surface';
 import type { TaskState, TaskReplacementDef, ExternalGatePolicyUpdate, WorkflowMeta, WorkflowStatus, WorkerActionSummary, WorkerLogEntry, WorkerStatusEntry } from './types.js';
 import type { SidebarSurface } from './lib/workflow-progress-surfaces.js';
@@ -2896,6 +2897,7 @@ export function App() {
       ...session,
       repoInput: value,
       repoError: null,
+      repoNotice: null,
     }));
   }, [activePlanningSession.id, updatePlanningSessionById]);
 
@@ -2904,6 +2906,7 @@ export function App() {
       ...session,
       baseBranchInput: value,
       repoError: null,
+      repoNotice: null,
     }));
   }, [activePlanningSession.id, updatePlanningSessionById]);
 
@@ -2939,11 +2942,13 @@ export function App() {
       let sessionId = currentBackendId;
       let viewId = session.id;
       const failBind = (id: string, sessionIdForResult: string | null, message: string): { ok: false; sessionId: string | null; error: string } => {
-        updatePlanningSessionById(id, (current) => ({ ...current, repoError: message }));
-        appendTerminalLine(`Could not bind repository: ${message}`, 'system', 'error', id);
+        const line = planningBindFailureLine(message);
+        updatePlanningSessionById(id, (current) => ({ ...current, repoError: line, repoNotice: null }));
+        appendTerminalLine(line, 'system', 'error', id);
         return { ok: false, sessionId: sessionIdForResult, error: message };
       };
       setPlanningRepoBindingId(viewId);
+      updatePlanningSessionById(viewId, (current) => ({ ...current, repoError: null, repoNotice: null }));
       if (!sessionId) {
         if (!invoker?.planningChatCreate) {
           return failBind(viewId, null, 'Planner is not available.');
@@ -2968,6 +2973,7 @@ export function App() {
                   repoInput: current.repoInput,
                   baseBranchInput: current.baseBranchInput,
                   repoError: null,
+                  repoNotice: null,
                 })
               : current
           );
@@ -3000,14 +3006,18 @@ export function App() {
         if (!result.ok) {
           return failBind(viewId, sessionId, result.error);
         }
+        const resolvedBranch = result.baseBranch || pendingBranch;
+        const notice = planningCloneReadyText(pending, resolvedBranch, result.action);
         updatePlanningSessionById(viewId, (current) => ({
           ...current,
           repoUrl: pending,
-          baseBranch: pendingBranch || current.baseBranch,
+          baseBranch: resolvedBranch || current.baseBranch,
           baseCommit: undefined,
           repoInput: undefined,
           repoError: null,
+          repoNotice: notice,
         }));
+        appendTerminalLine(notice, 'system', 'success', viewId);
         return { ok: true, sessionId };
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to bind the repository.';
@@ -4890,6 +4900,7 @@ export function App() {
             repoLocked={activePlanningRepoLocked}
             repoSuggestions={planningRepoSuggestions}
             repoError={activePlanningSession.repoError ?? null}
+            repoNotice={activePlanningSession.repoNotice ?? null}
             turnError={
               activePlanningSession.activeTurnStatus === 'failed'
               && activePlanningSession.activeTurnError !== PLANNING_TURN_CANCELLED_MESSAGE
