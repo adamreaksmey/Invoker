@@ -26,6 +26,7 @@ export type PlanningTerminalMode = 'chat' | 'tmux';
 export interface InvokerTerminalPlanningStream {
   text: string;
   status: 'streaming' | 'failed';
+  reply?: string;
 }
 
 export interface PlanningPresetOptionView {
@@ -403,6 +404,20 @@ function AssistantMessage({ text }: { text: string }): JSX.Element {
       <MessageBody text={text} toneClass="text-foreground" />
     </div>
   );
+}
+
+function StreamingAssistantMessage({ text }: { text: string }): ReactNode {
+  return (
+    <div className="max-w-[90%]" data-testid="invoker-terminal-streaming-reply" aria-live="polite">
+      <MessageBody text={text} toneClass="text-foreground" />
+    </div>
+  );
+}
+
+function streamingReplyText(stream: InvokerTerminalPlanningStream | null | undefined): string | null {
+  if (!stream || stream.status !== 'streaming') return null;
+  const reply = stream.reply?.trim();
+  return reply ? reply : null;
 }
 
 function renderCollapsedLine(
@@ -858,7 +873,7 @@ export function InvokerTerminal({
     if (shouldFollowTranscript) {
       scrollTranscriptToBottom('line_change', lines.length);
     }
-  }, [lines.length, planningStream?.text, scrollTranscriptToBottom, shouldFollowTranscript]);
+  }, [lines.length, planningStream?.text, planningStream?.reply, scrollTranscriptToBottom, shouldFollowTranscript]);
 
   useLayoutEffect(() => {
     const pending = pendingInputRef.current;
@@ -1030,6 +1045,7 @@ export function InvokerTerminal({
     );
     const groups = groupPlanningChatLines(collapsed);
     const streamFailed = planningStream?.status === 'failed';
+    const liveReply = streamingReplyText(planningStream);
 
     return (
       <div className="flex flex-col gap-3.5">
@@ -1057,6 +1073,7 @@ export function InvokerTerminal({
             isActiveTurnError
           />
         ) : null}
+        {liveReply ? <StreamingAssistantMessage text={liveReply} /> : null}
         {busy || planningStream ? (
           <div
             data-testid="invoker-terminal-planner-stream"
