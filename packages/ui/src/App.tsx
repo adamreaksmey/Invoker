@@ -2334,11 +2334,10 @@ export function App() {
       setDetachNotice(
         `Detached "${downstreamName}" from upstream "${upstreamName}". The active dependency was removed; detached lineage remains visible.`,
       );
-      refreshTaskGraph();
     } catch (err) {
       notifyMutationError('Detach Workflow failed:', err);
     }
-  }, [workflows, refreshTaskGraph]);
+  }, [workflows]);
 
   const handleAttachWorkflow = useCallback((workflowId: string) => {
     setWorkflowContextMenu(null);
@@ -2366,11 +2365,10 @@ export function App() {
       const options = finishedWorkflowAttachOptions(workflow?.status);
       await window.invoker?.attachWorkflow(workflowId, upstreamWorkflowId, options);
       setPendingAttach({ workflowId, upstreamWorkflowId, downstreamName, upstreamName });
-      refreshTaskGraph();
     } catch (err) {
       notifyMutationError('Attach Workflow failed:', err);
     }
-  }, [workflows, refreshTaskGraph, attachPickerWorkflowId]);
+  }, [workflows, attachPickerWorkflowId]);
 
   useEffect(() => {
     if (!detachNotice) return;

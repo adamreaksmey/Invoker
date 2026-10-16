@@ -56,10 +56,9 @@ test('attach removes the Detached badge from a workflow node', async ({ page }) 
     downstreamId,
     { timeout: 10000 },
   );
-  await page.getByRole('button', { name: 'Refresh' }).click();
-  await waitForStableUI(page);
 
   const badgeAfter = page.getByTestId(`workflow-node-${downstreamId}-detached-lineage`);
-  await expect(badgeAfter).toHaveCount(0);
+  await expect(badgeAfter).toHaveCount(0, { timeout: 10000 });
+  await waitForStableUI(page);
   await nodeLocator.screenshot({ path: path.join(OUT_DIR, 'after-no-detached-badge.png') });
 });
