@@ -227,6 +227,39 @@ describe('WorkflowGraph', () => {
     expect(edge).toHaveAttribute('data-kind', 'active');
     expect(edge).toHaveAttribute('data-stroke-dasharray', '');
     expect(edge).toHaveAccessibleName('Active workflow dependency');
+    expect(screen.getByTestId('workflow-node-wf-b-upstream')).toHaveTextContent('Waits on wf-a');
+  });
+
+  it('drops the waits-on label once the upstream workflow has completed', () => {
+    const workflows = new Map([
+      ['wf-a', wf('wf-a', 'completed')],
+      [
+        'wf-b',
+        wf('wf-b', 'review_ready', {
+          externalDependencies: [
+            {
+              workflowId: 'wf-a',
+              taskId: '__merge__',
+              requiredStatus: 'completed',
+              gatePolicy: 'completed',
+            },
+          ],
+        }),
+      ],
+    ]);
+
+    render(
+      <WorkflowGraph
+        workflows={workflows}
+        selectedWorkflowId={null}
+        statusFilters={new Set()}
+        onSelectWorkflow={() => {}}
+        onWorkflowContextMenu={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId('rf__edge-workflow:active:wf-a->wf-b')).toBeInTheDocument();
+    expect(screen.queryByTestId('workflow-node-wf-b-upstream')).not.toBeInTheDocument();
   });
 
   it('renders dependency-change lineage edges separately from active dependency edges', () => {

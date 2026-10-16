@@ -440,6 +440,81 @@ describe('Context menu (component)', { timeout: APP_CONTEXT_MENU_TEST_TIMEOUT_MS
     });
   });
 
+  describe('workflow attach', () => {
+    const upTask = makeUITask({
+      id: 'task-up',
+      description: 'Upstream task',
+      status: 'completed',
+      command: 'echo up',
+      workflowId: 'wf-up',
+    });
+    const downTask = makeUITask({
+      id: 'task-down',
+      description: 'Downstream task',
+      status: 'completed',
+      command: 'echo down',
+      workflowId: 'wf-down',
+    });
+    const detachedStack: WorkflowMeta[] = [
+      { id: 'wf-up', name: 'Upstream Workflow', status: 'completed', baseBranch: 'master' },
+      {
+        id: 'wf-down',
+        name: 'Downstream Workflow',
+        status: 'completed',
+        baseBranch: 'master',
+        detachedExternalDependencies: [{ workflowId: 'wf-up', requiredStatus: 'completed' }],
+      },
+    ];
+    const attachedStack: WorkflowMeta[] = [
+      detachedStack[0],
+      {
+        ...detachedStack[1],
+        externalDependencies: [{ workflowId: 'wf-up', requiredStatus: 'completed' }],
+        detachedExternalDependencies: undefined,
+      },
+    ];
+
+    async function setupDetachedStack() {
+      render(<App />);
+      fireEvent.click(await screen.findByTestId('sidebar-planning'));
+      await act(async () => {
+        mock.setTasks([upTask, downTask], detachedStack);
+        await new Promise((resolve) => setTimeout(resolve, TASK_GRAPH_EVENT_FLUSH_MS));
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId('workflow-node-wf-down')).toBeInTheDocument();
+      });
+    }
+
+    it('updates the graph from workflow metadata after attach without refresh', async () => {
+      vi.spyOn(window, 'confirm').mockReturnValue(true);
+      const refreshCallsBefore = mock.api.refreshTaskGraph.mock.calls.length;
+      await setupDetachedStack();
+
+      fireEvent.contextMenu(screen.getByTestId('workflow-node-wf-down'));
+      fireEvent.click(await screen.findByText('More'));
+      fireEvent.click(await screen.findByText('Attach to...'));
+      await screen.findByTestId('attach-workflow-picker');
+      fireEvent.click(await screen.findByRole('option', { name: /Upstream Workflow/i }));
+
+      await waitFor(() =>
+        expect(mock.api.attachWorkflow).toHaveBeenCalledWith('wf-down', 'wf-up', { force: true }),
+      );
+      expect(mock.api.refreshTaskGraph.mock.calls.length).toBe(refreshCallsBefore);
+
+      await act(async () => {
+        mock.fireWorkflowsChanged(attachedStack);
+        await new Promise((resolve) => setTimeout(resolve, TASK_GRAPH_EVENT_FLUSH_MS));
+      });
+
+      expect(screen.getByTestId('rf__edge-workflow:active:wf-up->wf-down')).toBeInTheDocument();
+      const feedback = await screen.findByTestId('detach-feedback');
+      expect(feedback).toHaveTextContent('Attached');
+      expect(feedback).toHaveTextContent('Downstream Workflow');
+      expect(feedback).toHaveTextContent('Upstream Workflow');
+    });
+  });
+
   it('workflow context menu copies workflow id', async () => {
     await setup();
     fireEvent.contextMenu(screen.getByTestId('workflow-node-wf-1'));

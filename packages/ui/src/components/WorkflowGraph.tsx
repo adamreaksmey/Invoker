@@ -3,6 +3,7 @@ import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent }
 import type { WorkflowMeta, WorkflowStatus } from '../types.js';
 import type { GraphCameraCommand, GraphCameraViewport } from '../lib/graph-camera.js';
 import type { WorkflowCoreActivity } from '../lib/workflow-core-activity.js';
+import { upstreamWaitLabel } from '../lib/attach-workflow-request.js';
 import { deriveWorkflowGraph, layoutWorkflowGraph, workflowGraphLayoutKey, type WorkflowGraphEdge, type WorkflowPosition } from '../lib/workflow-graph.js';
 import { WorkflowNode } from './WorkflowNode.js';
 import {
@@ -48,6 +49,7 @@ interface WorkflowNodeData extends Record<string, unknown> {
   selected: boolean;
   dimmed: boolean;
   coreActivity?: WorkflowCoreActivity;
+  upstreamLabel?: string;
   onSelect?: () => void;
 }
 
@@ -295,6 +297,7 @@ function WorkflowFlowNode({ data }: NodeProps<Node<WorkflowNodeData>>): JSX.Elem
         selected={data.selected}
         dimmed={data.dimmed}
         coreActivity={data.coreActivity}
+        upstreamLabel={data.upstreamLabel}
         onClick={() => data.onSelect?.()}
         onContextMenu={() => {}}
       />
@@ -397,6 +400,7 @@ function WorkflowGraphInner({
 
   const nodes = useMemo<Node<WorkflowNodeData>[]>(() => {
     const startedAt = performance.now();
+    const upstreamsById = new Map(graph.nodes.map((node) => [node.id, node.workflow]));
     const nextNodes = graph.nodes.map((node) => {
       const position = positions.get(node.id) ?? { x: 80, y: 80 };
       const dimmed = statusFilters.size > 0 && !statusFilters.has(node.workflow.status);
@@ -412,6 +416,7 @@ function WorkflowGraphInner({
           selected: selectedWorkflowIdRef.current === node.id,
           dimmed,
           coreActivity: coreActivityByWorkflow?.get(node.id),
+          upstreamLabel: upstreamWaitLabel(node.workflow.externalDependencies, upstreamsById),
           onSelect: () => onSelectWorkflow(node.id),
         },
       };

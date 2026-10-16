@@ -108,9 +108,9 @@ A task can also reach the terminal `skipped` status when an upstream task fails;
 
 Click **Create workflow**.
 
-This loads the workflow in a staged state. It does not start tasks.
+This loads the workflow in a staged state. It does not start tasks. You can return to the same planning chat and describe a follow-up change for that repository. The submitted plan stays available from **Open graph** until the workflow is built. After it reaches completed, review ready, or awaiting approval, **Draft ready** and **Plan ready** leave the chat.
 
-Click **Open graph** and select the workflow node. The task DAG should show the implementation and verification tasks as pending. You can inspect their prompts, commands, dependencies, and repository metadata before execution.
+Click **Open graph** and select the workflow node. The task DAG should show the implementation and verification tasks as pending. You can inspect their prompts, commands, dependencies, and repository metadata before execution. The floating task DAG starts compact; **Larger** on its title bar expands it, and **Smaller** returns it to the compact size.
 
 Checkpoint: no task should be running yet, and the Home message should say to review the graph and then use **Start ready work**.
 
@@ -156,7 +156,7 @@ Use the in-app planning flow above when you want to review the graph before star
 ## If something fails
 
 - If the temporary repository no longer exists, rerun the generator. Operating-system cleanup may remove `$TMPDIR` contents.
-- If the Repo sidebar shows the wrong repository, update `~/.invoker/config.json`, restart Invoker, and create a new planning chat.
+- Planning chat will not draft or submit until you enter a repository in the composer. Leave **Base branch** empty to use the remote's default branch, or type one (`master`, `main`, …). While Invoker checks the repository, the chat is covered and says `Validating the repository. Please wait.` It then shows either `Cloned <repo> on <branch>.` or `Clone failed:` / `Clone finished, but binding failed:`. After a successful check, Repository and Base branch stay visible and locked. Press **Edit**, change them, then **Done** to check again. A failed bind keeps that row editable: change the branch and press Retry. `defaultRepoUrl` in `~/.invoker/config.json` is not used as a silent target for that chat.
 - If Codex reports an expired refresh token, run `codex logout`, then `codex login`, and retry.
 - If Planning Chat reports a harness isn't authenticated (preflight or mid-turn): for Cursor run `cursor agent login` or `cursor-agent login` (prefer the latter if the first hangs) or set `CURSOR_API_KEY`; for Codex run `codex login` (or `invoker-cli agent-login`); for Claude run `/login` in `claude` (or `invoker-cli agent-login`); then retry. Invoker checks Claude/Codex/Cursor auth before spawning a turn when a reliable status command exists; OMP still relies on mid-turn detection.
 - If a plan targets GitHub unexpectedly, check its `repoUrl` in Raw YAML before creating the workflow.
@@ -167,7 +167,7 @@ Use the in-app planning flow above when you want to review the graph before star
 
 For another repository:
 
-- Bind the intended repository and branch before starting a new planning chat.
+- Enter the repository in the planning composer. After Invoker checks it, press **Edit** to change the repository or base branch, then **Done** to check again. A new chat is a new plan, including when it uses a repository that already has a planning checkout. Invoker will not fall back to the local checkout or `defaultRepoUrl`.
 - Give the agent one concrete implementation task.
 - Add deterministic command tasks for verification.
 - Use `onFinish: none` while learning or when no remote publication is required.

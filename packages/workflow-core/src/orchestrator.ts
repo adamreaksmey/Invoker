@@ -3434,7 +3434,9 @@ export class Orchestrator {
 
   detachWorkflow(workflowId: string, upstreamWorkflowId: string): void {
     this.syncAllFromDb();
-    this.detachWorkflowInternal(workflowId, upstreamWorkflowId);
+    this.detachWorkflowInternal(workflowId, upstreamWorkflowId, undefined, {
+      skipDownstreamInvalidation: true,
+    });
   }
 
   /**
@@ -3547,7 +3549,6 @@ export class Orchestrator {
       action: 'added',
     });
 
-    this.autoStartExternallyUnblockedReadyTasks();
     this.checkWorkflowCompletion(workflowId);
   }
 
@@ -4542,6 +4543,13 @@ export class Orchestrator {
       upstreamWorkflowId,
       action: 'removed',
     });
+
+    if (options?.skipDownstreamInvalidation) {
+      this.persistence.logEvent?.(eventTask.id, 'task.workflow_detached', {
+        workflowId,
+        upstreamWorkflowId,
+      });
+    }
 
     if (!options?.skipDownstreamInvalidation) {
       const affectedWorkflowIds = [workflowId, ...this.collectDownstreamWorkflowIds(workflowId)];

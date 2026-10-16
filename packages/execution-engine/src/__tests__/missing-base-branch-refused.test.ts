@@ -56,6 +56,11 @@ describe('missing named base branch is refused at task start', () => {
     expect((await resolvePlanBaseRevision(runGit, 'main')).trim()).toBe(masterSha);
   });
 
+  it('resolvePlanBaseRevision rejects main without the master alternate when strict', async () => {
+    await expect(resolvePlanBaseRevision(runGit, 'main', { allowMainMasterAlternate: false }))
+      .rejects.toThrow(/was not found on the remote/);
+  });
+
   const runScript = (baseRef: string) => {
     const script = buildMirrorCloneScript({
       repoUrl: originRepo,

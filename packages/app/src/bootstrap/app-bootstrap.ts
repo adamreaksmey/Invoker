@@ -23,9 +23,23 @@ export function shouldBootstrapDaemonOwner(preference: GuiOwnerPreference): bool
   return preference === 'daemon' || preference === 'auto';
 }
 
+const DEFAULT_GUI_AUTO_OWNER_BOOTSTRAP_TIMEOUT_MS = 20_000;
+const DEFAULT_GUI_LOCK_CONFLICT_OWNER_WAIT_MS = 20_000;
+
 export function guiAutoOwnerBootstrapTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
-  const parsed = Number.parseInt(env.INVOKER_GUI_AUTO_OWNER_BOOTSTRAP_TIMEOUT_MS ?? '5000', 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 5000;
+  const parsed = Number.parseInt(
+    env.INVOKER_GUI_AUTO_OWNER_BOOTSTRAP_TIMEOUT_MS ?? String(DEFAULT_GUI_AUTO_OWNER_BOOTSTRAP_TIMEOUT_MS),
+    10,
+  );
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_GUI_AUTO_OWNER_BOOTSTRAP_TIMEOUT_MS;
+}
+
+export function guiLockConflictOwnerWaitMs(env: NodeJS.ProcessEnv = process.env): number {
+  const parsed = Number.parseInt(
+    env.INVOKER_GUI_LOCK_CONFLICT_OWNER_WAIT_MS ?? String(DEFAULT_GUI_LOCK_CONFLICT_OWNER_WAIT_MS),
+    10,
+  );
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_GUI_LOCK_CONFLICT_OWNER_WAIT_MS;
 }
 
 export function guiOwnerBootstrapTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {

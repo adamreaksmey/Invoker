@@ -767,7 +767,32 @@ describe('ApprovalModal', () => {
     );
     fireEvent.click(screen.getByText('Approve'));
     expect(onApprove).toHaveBeenCalledWith('task-42');
-    expect(onClose).toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Working...' })).toBeDisabled();
+  });
+
+  it('explains an open pull request without a confirm button', () => {
+    const onClose = vi.fn();
+    render(
+      <ApprovalModal
+        task={makeTask({
+          id: '__merge__wf-1',
+          config: { isMergeNode: true },
+          execution: { reviewUrl: 'https://github.com/example/repo/pull/2' },
+        })}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        onClose={onClose}
+        onFinish="pull_request"
+        mergeMode="manual"
+        decisionError="Pull request #2 is still open on GitHub. Merge it there. This screen does not merge it. Invoker marks the plan done after it sees that merge."
+      />,
+    );
+    expect(screen.getByRole('heading', { name: 'Pull request is on GitHub' })).toBeInTheDocument();
+    expect(screen.getByTestId('github-merge-notice')).toHaveTextContent('already open');
+    expect(screen.queryByRole('button', { name: 'Confirm Create PR' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('approval-decision-error')).toHaveTextContent('Pull request #2 is still open');
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   // ── Reject callback ───────────────────────────────────────
@@ -792,7 +817,7 @@ describe('ApprovalModal', () => {
     // Second click confirms
     fireEvent.click(screen.getByText('Confirm Reject'));
     expect(onReject).toHaveBeenCalledWith('task-7', 'Bad output');
-    expect(onClose).toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('calls onReject with undefined reason when reason is empty', () => {
@@ -823,7 +848,7 @@ describe('ApprovalModal', () => {
     expect(screen.getByRole('heading', { name: 'Confirm Merge' })).toBeInTheDocument();
   });
 
-  it('renders "Confirm Create PR" heading for merge node with onFinish="pull_request"', () => {
+  it('does not offer Confirm Create PR when the plan finishes on GitHub', () => {
     render(
       <ApprovalModal
         task={makeTask({ config: { isMergeNode: true } })}
@@ -833,7 +858,46 @@ describe('ApprovalModal', () => {
         onFinish="pull_request"
       />,
     );
-    expect(screen.getByRole('heading', { name: 'Confirm Create PR' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Pull request is on GitHub' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Confirm Create PR' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('github-merge-notice')).toHaveTextContent('not from this screen');
+    expect(screen.queryByRole('button', { name: 'Reject PR' })).not.toBeInTheDocument();
+  });
+
+  it('renders the merge summary as markdown', () => {
+    const summary = [
+      '## Summary',
+      'Goal: Make every text element render at 15px.',
+      '',
+      '---',
+      'Set all app text to 15px — 2 tasks completed, 0 failed, 0 closed, 0 skipped',
+      '',
+      '<details>',
+      '<summary>Task breakdown</summary>',
+      '',
+      '| Task | Description | Status |',
+      '|------|-------------|--------|',
+      '| task-a | Paint text | completed (passed) |',
+      '',
+      '</details>',
+    ].join('\n');
+    render(
+      <ApprovalModal
+        task={makeTask({ config: { isMergeNode: true, summary } })}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        onClose={vi.fn()}
+        onFinish="pull_request"
+      />,
+    );
+
+    const rendered = screen.getByTestId('approval-summary');
+    expect(rendered.querySelector('h2')).toHaveTextContent('Summary');
+    expect(rendered.querySelector('hr')).toBeInTheDocument();
+    expect(rendered.querySelector('summary')).toHaveTextContent('Task breakdown');
+    expect(screen.getByRole('columnheader', { name: 'Task' })).toBeInTheDocument();
+    expect(rendered.textContent).not.toContain('## Summary');
+    expect(rendered.textContent).not.toContain('<details>');
   });
 
   it('shows a "Confirm Merge" *button* matching the heading for onFinish="merge"', () => {
@@ -849,7 +913,7 @@ describe('ApprovalModal', () => {
     expect(screen.getByRole('button', { name: 'Confirm Merge' })).toBeInTheDocument();
   });
 
-  it('shows "Confirm Create PR" button label for merge node with onFinish="pull_request"', () => {
+  it('hides reject when the plan finishes on GitHub', () => {
     render(
       <ApprovalModal
         task={makeTask({ config: { isMergeNode: true } })}
@@ -859,47 +923,8 @@ describe('ApprovalModal', () => {
         onFinish="pull_request"
       />,
     );
-    expect(screen.getByRole('button', { name: 'Confirm Create PR' })).toBeInTheDocument();
-  });
-
-  it('shows a "Confirm Create PR" heading and button that match for onFinish="pull_request"', () => {
-    render(
-      <ApprovalModal
-        task={makeTask({ config: { isMergeNode: true } })}
-        onApprove={vi.fn()}
-        onReject={vi.fn()}
-        onClose={vi.fn()}
-        onFinish="pull_request"
-      />,
-    );
-    expect(screen.getByRole('heading', { name: 'Confirm Create PR' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Confirm Create PR' })).toBeInTheDocument();
-  });
-
-  it('reject button says "Reject PR" (not "Reject Merge") for onFinish="pull_request"', () => {
-    render(
-      <ApprovalModal
-        task={makeTask({ config: { isMergeNode: true } })}
-        onApprove={vi.fn()}
-        onReject={vi.fn()}
-        onClose={vi.fn()}
-        onFinish="pull_request"
-      />,
-    );
-    expect(screen.getByRole('button', { name: 'Reject PR' })).toBeInTheDocument();
-  });
-
-  it('confirm-reject button says "Confirm Reject PR" for onFinish="pull_request"', () => {
-    render(
-      <ApprovalModal
-        task={makeTask({ config: { isMergeNode: true } })}
-        onApprove={vi.fn()}
-        onReject={vi.fn()}
-        onClose={vi.fn()}
-        onFinish="pull_request"
-      />,
-    );
-    fireEvent.click(screen.getByRole('button', { name: /reject/i }));
-    expect(screen.getByRole('button', { name: 'Confirm Reject PR' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject PR' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject Merge' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
   });
 });

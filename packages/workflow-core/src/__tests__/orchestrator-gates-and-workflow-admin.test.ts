@@ -1556,7 +1556,7 @@ describe('Orchestrator', () => {
   });
 
   describe('detachWorkflow', () => {
-    it('removes only the selected upstream edge, rewrites baseBranch, and voids descendants to pending', () => {
+    it('removes only the selected upstream edge, rewrites baseBranch, and preserves task execution state', () => {
       orchestrator.loadPlan({
         name: 'upstream-a',
         baseBranch: 'master',
@@ -1634,9 +1634,9 @@ describe('Orchestrator', () => {
 
       const childTask = orchestrator.getTask(childTaskId)!;
       expect(childTask.status).toBe('pending');
-      expect(childTask.execution.branch).toBeUndefined();
-      expect(childTask.execution.commit).toBeUndefined();
-      expect(childTask.execution.workspacePath).toBeUndefined();
+      expect(childTask.execution.branch).toBe('feature/child-leaf');
+      expect(childTask.execution.commit).toBe('def456');
+      expect(childTask.execution.workspacePath).toBe('/tmp/child-worktree');
       expect(persistence.loadWorkflow(childTaskId.split('/')[0]!)!.externalDependencies).toEqual([
         { workflowId: targetWfId, taskId: '__merge__', requiredStatus: 'completed', gatePolicy: 'review_ready' },
       ]);
@@ -1902,7 +1902,7 @@ describe('Orchestrator', () => {
     });
 
 
-    it('voids a running target workflow and its descendants back to pending without auto-starting them', () => {
+    it('preserves running target workflow and descendant task statuses without auto-starting new work', () => {
       orchestrator.loadPlan({
         name: 'upstream-runtime',
         baseBranch: 'master',
@@ -1950,7 +1950,7 @@ describe('Orchestrator', () => {
 
       orchestrator.detachWorkflow(targetWfId, upstreamWfId);
 
-      expect(orchestrator.getTask(targetTaskId)!.status).toBe('pending');
+      expect(orchestrator.getTask(targetTaskId)!.status).toBe('running');
       expect(orchestrator.getTask(targetTaskId)!.config.externalDependencies).toBeUndefined();
       expect(persistence.loadWorkflow(targetWfId)!.externalDependencyChanges).toEqual([
         {

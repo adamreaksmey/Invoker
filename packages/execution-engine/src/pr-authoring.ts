@@ -96,6 +96,25 @@ function headingValue(description: string, heading: string): string | undefined 
   return undefined;
 }
 
+const MULTI_REVIEW_CLAIM_PREVIEW_LIMIT = 3;
+
+export function formatMultipleReviewClaimsSinglePrError(options: {
+  claimCount: number;
+  claims: readonly string[];
+  subject?: string;
+}): string {
+  const subject = options.subject ?? 'This plan';
+  const preview = options.claims.slice(0, MULTI_REVIEW_CLAIM_PREVIEW_LIMIT);
+  const remaining = options.claims.length - preview.length;
+  const quoted = preview.map((claim) => `"${claim}"`).join(', ');
+  const overflow = remaining > 0 ? `, and ${remaining} more` : '';
+  return (
+    `${subject} has ${options.claimCount} different review claims but would open only one PR. `
+    + 'Either give every prompt task the same Review claim, or split into a workflow chain '
+    + `(one claim per workflow). Claims found: ${quoted}${overflow}.`
+  );
+}
+
 export function reviewClaimSlices(
   tasks: readonly { description: string; command?: string }[],
 ): string[] {

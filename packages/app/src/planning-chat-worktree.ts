@@ -67,7 +67,13 @@ async function acquireProvisionAndSoftRelease(
   sessionId: string,
   dependencyOptions?: PlanningDependencyPreparationOptions,
 ): Promise<AcquiredWorktree> {
-  const acquired = await pool.acquireWorktree(repoUrl, branch, baseCommit, sessionId);
+  const acquired = await pool.acquireWorktree(
+    repoUrl,
+    branch,
+    baseCommit,
+    sessionId,
+    { reclaimIdlePlanningWorktrees: true },
+  );
   await preparePlanningWorktreeDependencies(acquired.worktreePath, dependencyOptions);
   writePlanningMcpConfig(acquired.worktreePath, sessionId);
   acquired.softRelease();
@@ -81,7 +87,12 @@ export async function provisionPlanningWorktree(
 ): Promise<ProvisionedPlanningWorktree> {
   const { repoUrl, baseBranch, sessionId } = binding;
   await pool.ensureCloneThroughRepoQueue(repoUrl);
-  const baseCommit = await pool.resolveBaseCommit(repoUrl, baseBranch);
+  const baseCommit = await pool.resolveBaseCommit(
+    repoUrl,
+    baseBranch,
+    undefined,
+    { allowMainMasterAlternate: false },
+  );
   const branch = resolvePlanningWorktreeBranch(sessionId);
   const acquired = await acquireProvisionAndSoftRelease(pool, repoUrl, branch, baseCommit, sessionId, dependencyOptions);
   return { worktreePath: acquired.worktreePath, baseCommit, branch };

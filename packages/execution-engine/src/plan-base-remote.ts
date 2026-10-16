@@ -10,6 +10,10 @@ const REMOTES_PREFIX = 'refs/remotes/';
 /** Git runner: args + implicit cwd (caller binds cwd via closure). */
 export type GitExec = (args: string[]) => Promise<string>;
 
+export interface ResolvePlanBaseRevisionOptions {
+  allowMainMasterAlternate?: boolean;
+}
+
 interface RemoteQualifiedRef {
   remoteName: string;
   branchName: string;
@@ -179,7 +183,9 @@ export function shouldResolveViaOriginTracking(ref: string): boolean {
 export async function resolvePlanBaseRevision(
   runGit: GitExec,
   baseRef: string,
+  options: ResolvePlanBaseRevisionOptions = {},
 ): Promise<string> {
+  const allowMainMasterAlternate = options.allowMainMasterAlternate ?? true;
   const r = baseRef.trim() || 'HEAD';
   if (r === 'HEAD') {
     return (await runGit(['rev-parse', 'HEAD'])).trim();
@@ -199,12 +205,14 @@ export async function resolvePlanBaseRevision(
     const synced = await tryResolveCommit(runGit, remoteExpr);
     if (synced) return synced;
 
-    const alternateResolved = await tryResolveAlternateDefaultBranch(
-      runGit,
-      explicitRemote.branchName,
-      explicitRemote.remoteName,
-    );
-    if (alternateResolved) return alternateResolved;
+    if (allowMainMasterAlternate) {
+      const alternateResolved = await tryResolveAlternateDefaultBranch(
+        runGit,
+        explicitRemote.branchName,
+        explicitRemote.remoteName,
+      );
+      if (alternateResolved) return alternateResolved;
+    }
 
     throw new Error(
       `Base branch "${explicitRemote.branchName}" (from "${r}") was not found on the remote `
@@ -234,8 +242,10 @@ export async function resolvePlanBaseRevision(
   const localAfterSync = await tryResolveCommit(runGit, localExpr);
   if (localAfterSync) return localAfterSync;
 
-  const alternateResolved = await tryResolveAlternateDefaultBranch(runGit, branchName, preferredRemote);
-  if (alternateResolved) return alternateResolved;
+  if (allowMainMasterAlternate) {
+    const alternateResolved = await tryResolveAlternateDefaultBranch(runGit, branchName, preferredRemote);
+    if (alternateResolved) return alternateResolved;
+  }
 
   throw new Error(
     `Base branch "${branchName}" was not found on the remote ${preferredRemote} `

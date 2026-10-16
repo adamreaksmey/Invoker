@@ -37,6 +37,16 @@ export function workflowStatusVisual(status: WorkflowStatus): WorkflowStatusVisu
   };
 }
 
+const BUILT_WORKFLOW_STATUSES: ReadonlySet<WorkflowStatus> = new Set([
+  'awaiting_approval',
+  'completed',
+  'review_ready',
+]);
+
 export function isWorkflowStatusActive(status: WorkflowStatus): boolean {
   return status === 'running';
+}
+
+export function isWorkflowBuilt(status: WorkflowStatus | undefined): boolean {
+  return status !== undefined && BUILT_WORKFLOW_STATUSES.has(status);
 }

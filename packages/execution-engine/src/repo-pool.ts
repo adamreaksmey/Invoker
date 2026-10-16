@@ -18,7 +18,12 @@ import {
   parseGitWorktreePorcelain,
   parseExperimentBranch,
 } from './worktree-discovery.js';
-import { syncPlanBaseRemoteForRef, isInvokerManagedPoolBranch, resolvePlanBaseRevision } from './plan-base-remote.js';
+import {
+  syncPlanBaseRemoteForRef,
+  isInvokerManagedPoolBranch,
+  resolvePlanBaseRevision,
+  type ResolvePlanBaseRevisionOptions,
+} from './plan-base-remote.js';
 import { remoteFetchForPool } from './remote-fetch-policy.js';
 import { isWorkspaceCleanupEnabled } from './workspace-cleanup-policy.js';
 import { computeRepoCacheHash, computeRepoCacheKey, sanitizeBranchForPath } from './git-utils.js';
@@ -88,6 +93,11 @@ export interface AcquireWorktreeOptions {
    * is enforced by the in-memory Set only, same as today.
    */
   leaseHolderId?: string;
+  /**
+   * Drop idle invoker/planning checkouts for this repo so a new planning chat
+   * can have its own worktree. Checkouts currently held in memory stay.
+   */
+  reclaimIdlePlanningWorktrees?: boolean;
 }
 
 interface RebaseRefreshBatch {
@@ -338,7 +348,12 @@ export class RepoPool {
     return undefined;
   }
 
-  async resolveBaseCommit(repoUrl: string, baseBranch: string, timing?: RepoPoolTiming): Promise<string> {
+  async resolveBaseCommit(
+    repoUrl: string,
+    baseBranch: string,
+    timing?: RepoPoolTiming,
+    options?: ResolvePlanBaseRevisionOptions,
+  ): Promise<string> {
     const batch = this.pendingRebaseRefreshBatches.get(this.repoKey(repoUrl));
     const batchedCommit = batch?.resolvedBaseCommits.get(baseBranch);
     if (batchedCommit) {
@@ -351,7 +366,7 @@ export class RepoPool {
     const dir = this.cloneDir(repoUrl);
     const runGit = (args: string[]) => this.execGit(args, dir);
     return this.time(timing, 'RepoPool.resolveBaseCommit.resolvePlanBaseRevision', { dir, baseBranch }, () =>
-      resolvePlanBaseRevision(runGit, baseBranch),
+      resolvePlanBaseRevision(runGit, baseBranch, options),
     );
   }
 
@@ -805,6 +820,87 @@ export class RepoPool {
     }
   }
 
+  private planningBranchHasRoom(porcelain: string, branch: string): boolean {
+    const entries = parseGitWorktreePorcelain(porcelain);
+    if (entries.some((entry) => entry.branch === branch)) return true;
+    return countPlanningWorktreesFromPorcelain(porcelain) < this.maxWorktrees;
+  }
+
+  private planningWorktreeLimitError(repoUrl: string, porcelain: string): ResourceLimitError {
+    const count = countPlanningWorktreesFromPorcelain(porcelain);
+    return new ResourceLimitError(
+      `Planning worktree limit reached for ${repoUrl}: ${count}/${this.maxWorktrees} on disk`,
+    );
+  }
+
+  private async readWorktreePorcelain(clonePath: string, startup?: ExecutorStartup): Promise<string> {
+    try {
+      return await this.execGit(['worktree', 'list', '--porcelain'], clonePath, startup);
+    } catch {
+      startup?.check();
+      return '';
+    }
+  }
+
+  private isRemovablePlanningWorktree(
+    entry: { path: string; branch?: string },
+    keepBranch: string,
+    active: Set<string>,
+  ): boolean {
+    if (!isPlanningBranch(entry.branch) || entry.branch === keepBranch) return false;
+    return !active.has(canonicalPathForComparison(entry.path));
+  }
+
+  private async removeWorktreeBestEffort(
+    clonePath: string,
+    worktreePath: string,
+    startup?: ExecutorStartup,
+  ): Promise<void> {
+    try {
+      await this.execGit(['worktree', 'remove', '--force', worktreePath], clonePath, startup);
+    } catch {
+      startup?.check();
+    }
+  }
+
+  private async removeIdlePlanningWorktrees(
+    clonePath: string,
+    porcelain: string,
+    keepBranch: string,
+    active: Set<string>,
+    startup?: ExecutorStartup,
+  ): Promise<void> {
+    const idle = parseGitWorktreePorcelain(porcelain).filter((entry) =>
+      this.isRemovablePlanningWorktree(entry, keepBranch, active),
+    );
+    for (const entry of idle) {
+      await this.removeWorktreeBestEffort(clonePath, entry.path, startup);
+    }
+  }
+
+  private async reclaimPlanningSlotIfNeeded(input: {
+    clonePath: string;
+    porcelain: string;
+    branch: string;
+    repoUrl: string;
+    active: Set<string>;
+    reclaimIdle: boolean;
+    startup?: ExecutorStartup;
+  }): Promise<void> {
+    if (this.planningBranchHasRoom(input.porcelain, input.branch)) return;
+    if (!input.reclaimIdle) throw this.planningWorktreeLimitError(input.repoUrl, input.porcelain);
+    await this.removeIdlePlanningWorktrees(
+      input.clonePath,
+      input.porcelain,
+      input.branch,
+      input.active,
+      input.startup,
+    );
+    const refreshed = await this.readWorktreePorcelain(input.clonePath, input.startup);
+    if (this.planningBranchHasRoom(refreshed, input.branch)) return;
+    throw this.planningWorktreeLimitError(input.repoUrl, refreshed);
+  }
+
   private async doAcquireWorktree(
     repoUrl: string,
     branch: string,
@@ -853,11 +949,15 @@ export class RepoPool {
     });
 
     if (isPlanning) {
-      if (!branchAlreadyExists && planningWorktreeCount >= this.maxWorktrees) {
-        throw new ResourceLimitError(
-          `Planning worktree limit reached for ${repoUrl}: ${planningWorktreeCount}/${this.maxWorktrees} on disk`,
-        );
-      }
+      await this.reclaimPlanningSlotIfNeeded({
+        clonePath,
+        porcelain,
+        branch,
+        repoUrl,
+        active,
+        reclaimIdle: opts?.reclaimIdlePlanningWorktrees === true,
+        startup,
+      });
     } else {
       if (active.size >= this.maxWorktrees) {
         throw new ResourceLimitError(`Worktree limit reached for ${repoUrl}: ${active.size}/${this.maxWorktrees}`);

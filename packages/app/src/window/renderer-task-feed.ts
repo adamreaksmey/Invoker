@@ -100,12 +100,25 @@ export interface RendererTaskFeed {
   startActivityPolling(): RendererTaskFeedStopHandle;
 }
 
+function workflowMetadataSignature(workflows: readonly Workflow[]): string {
+  return workflows.map((workflow) => `${workflow.id}:${workflow.status}:${workflow.updatedAt}`).join('|');
+}
+
 export function createRendererTaskFeed(deps: RendererTaskFeedDeps): RendererTaskFeed {
   const lastKnownTaskStates = new TaskSnapshotCache();
   const workflowRollupProjection = new WorkflowRollupProjection();
   const pendingOutputBuffers = new Map<string, string[]>();
   const outputFlushTimers = new Map<string, RendererTaskFeedTimer>();
   let lastKnownWorkflowCount = 0;
+  let lastKnownWorkflowMetadataSignature: string | undefined;
+
+  const recordWorkflowMetadataSignature = (workflows: readonly Workflow[]): boolean => {
+    const signature = workflowMetadataSignature(workflows);
+    const hasChanged = lastKnownWorkflowMetadataSignature !== undefined
+      && signature !== lastKnownWorkflowMetadataSignature;
+    lastKnownWorkflowMetadataSignature = signature;
+    return hasChanged;
+  };
 
   const flushTaskOutput = (taskId: string): void => {
     const timer = outputFlushTimers.get(taskId);
@@ -211,6 +224,7 @@ export function createRendererTaskFeed(deps: RendererTaskFeedDeps): RendererTask
         const canPublishUi = !!mainWindow && !mainWindow.isDestroyed();
         const workflows = deps.persistence.listWorkflows();
 
+        const hasWorkflowMetadataChanged = recordWorkflowMetadataSignature(workflows);
         if (workflows.length !== lastKnownWorkflowCount) {
           const msg = `Workflow count changed: ${lastKnownWorkflowCount} → ${workflows.length}`;
           deps.logger.info(msg, { module: 'db-poll' });
@@ -222,6 +236,8 @@ export function createRendererTaskFeed(deps: RendererTaskFeedDeps): RendererTask
 
           deps.getOrchestrator().syncAllFromDb();
           deps.logger.info(`Synced orchestrator for all ${workflows.length} workflows`, { module: 'db-poll' });
+        } else if (hasWorkflowMetadataChanged && canPublishUi) {
+          deps.requestWorkflowMetadataPublish('db-poll-metadata');
         }
 
         const activeWorkflows = workflows.filter(

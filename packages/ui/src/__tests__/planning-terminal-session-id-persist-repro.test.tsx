@@ -34,6 +34,10 @@ describe('planning terminal failed first send session id persist repro', () => {
   }
 
   function submitPlanningText(text: string) {
+    const repoInput = screen.queryByTestId('invoker-terminal-repo') as HTMLInputElement | null;
+    if (repoInput && !repoInput.value) {
+      fireEvent.change(repoInput, { target: { value: 'https://example.com/planning-repo.git' } });
+    }
     fireEvent.change(screen.getByTestId('invoker-terminal-input'), { target: { value: text } });
     fireEvent.submit(screen.getByTestId('invoker-terminal-input').closest('form')!);
   }
@@ -63,6 +67,7 @@ describe('planning terminal failed first send session id persist repro', () => {
     expect(await screen.findByText('planner exited before producing a reply')).toBeInTheDocument();
     expect(mock.api.planningChatSend).toHaveBeenNthCalledWith(1, {
       turnId: expect.any(String),
+      sessionId: 'session-1',
       message: 'draft a plan that fails before replying',
       presetKey: 'codex',
       confirmationMode: 'require',

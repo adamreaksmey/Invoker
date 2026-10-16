@@ -28,6 +28,7 @@ import { getEdgeStyle, getEffectiveVisualStatus, matchesStatusFilter } from '../
 import { TaskNode, isTaskNodeActionable } from './TaskNode.js';
 import { BundledEdge, type BundledEdgeData } from './BundledEdge.js';
 import { MergeGateNode } from './MergeGateNode.js';
+import { TaskGraphSelectionSummary } from './TaskGraphSelectionSummary.js';
 import {
   isMergeGateId,
   groupTasksByWorkflow,
@@ -71,8 +72,11 @@ type LayoutState = {
   result: TaskGraphLayout;
 };
 
-function truncateEdgeEndpoint(label: string): string {
-  return label.length > 12 ? label.slice(0, 12) + '..' : label;
+const EDGE_ENDPOINT_MAX_CHARS = 48;
+
+function limitEdgeEndpoint(label: string): string {
+  if (label.length <= EDGE_ENDPOINT_MAX_CHARS) return label;
+  return `${label.slice(0, EDGE_ENDPOINT_MAX_CHARS - 1)}…`;
 }
 
 function unscopedTaskId(task: TaskState): string {
@@ -86,7 +90,9 @@ function unscopedTaskId(task: TaskState): string {
 /** Short label for edge hover tooltip showing the dependency relationship. */
 function buildEdgeEndpointLabel(taskId: string, task?: TaskState): string {
   if (task?.config.isMergeNode || isMergeGateId(taskId)) return 'Merge';
-  return truncateEdgeEndpoint(task ? unscopedTaskId(task) : taskId);
+  const description = task?.description.trim();
+  if (description) return limitEdgeEndpoint(description);
+  return limitEdgeEndpoint(task ? unscopedTaskId(task) : taskId);
 }
 
 function buildEdgeLabel(
@@ -680,18 +686,20 @@ function TaskDAGInner({ tasks, workflows, selectedTaskId, cameraCommand, onTaskC
     );
   }
 
-  const browserHeight = surfaceMode === 'browser' ? '300px' : '100%';
+  const selectedTask = selectedTaskId ? tasks.get(selectedTaskId) : undefined;
+  const selectedSummaryTask = surfaceMode === 'default' ? undefined : selectedTask;
 
   return (
     <div
       ref={graphRootRef}
-      className="flex min-h-0 w-full flex-1 overflow-hidden"
-      style={{ height: browserHeight }}
+      className="flex min-h-0 w-full flex-1 flex-col overflow-hidden"
+      style={{ height: '100%' }}
     >
+      <div className="min-h-0 flex-1">
       <ReactFlow
         key={flowInstanceKey}
         className="h-full w-full"
-        style={{ width: '100%', height: browserHeight }}
+        style={{ width: '100%', height: '100%' }}
         nodes={rfNodes}
         edges={edges}
         nodeTypes={nodeTypes}
@@ -720,6 +728,8 @@ function TaskDAGInner({ tasks, workflows, selectedTaskId, cameraCommand, onTaskC
           }}
         />
       </ReactFlow>
+      </div>
+      {selectedSummaryTask ? <TaskGraphSelectionSummary task={selectedSummaryTask} /> : null}
     </div>
   );
 }

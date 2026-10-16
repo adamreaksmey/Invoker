@@ -1,3 +1,5 @@
+export const SQLITE_READ_ONLY_PROCESS_ERROR = 'SQLiteAdapter is read-only in this process';
+
 export interface SqliteExecutor {
   queryOne(sql: string, params?: unknown[]): Record<string, unknown> | undefined;
   queryAll(sql: string, params?: unknown[]): Record<string, unknown>[];

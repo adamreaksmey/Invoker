@@ -360,6 +360,41 @@ describe('WorkflowInspector', () => {
     expect(screen.getByText('No pull requests yet')).toBeInTheDocument();
   });
 
+  it('explains an empty pull request stack when the gate skipped publication', () => {
+    const reason = 'No pull request opened. plan/font has no file changes against main.';
+    render(
+      <WorkflowInspector
+        workflow={{ ...workflow, status: 'completed', onFinish: 'pull_request' }}
+        task={makeTask({
+          id: '__merge__wf-1',
+          description: 'Pull request gate',
+          status: 'completed',
+          config: { workflowId: 'wf-1', isMergeNode: true },
+          execution: { reviewStatus: reason },
+        })}
+        reviewGate={{
+          workflowId: 'wf-1',
+          mergeTaskId: '__merge__wf-1',
+          status: 'completed',
+          activeGeneration: 0,
+          completion: { required: 'all', status: 'approved' },
+          ready: false,
+          substate: null,
+          artifacts: [],
+          discardedArtifacts: [],
+          edges: [],
+        }}
+        collapsed={false}
+        advancedExpanded={false}
+        onToggleCollapsed={() => {}}
+        onToggleAdvanced={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId('empty-review-publication-alert')).toHaveTextContent(reason);
+    expect(screen.queryByText('No pull requests yet')).not.toBeInTheDocument();
+  });
+
   it('renders a flat pull request stack in artifact order', () => {
     render(
       <WorkflowInspector
@@ -810,10 +845,34 @@ describe('WorkflowInspector', () => {
     expect(screen.queryByRole('button', { name: 'Reject Merge' })).not.toBeInTheDocument();
   });
 
-  it('keeps merge approval actions for workflows with a configured finish action', () => {
+  it('hides Approve Merge when the pull request is finished on GitHub', () => {
     render(
       <WorkflowInspector
-        workflow={{ ...workflow, status: 'review_ready', onFinish: 'pull_request' }}
+        workflow={{ ...workflow, status: 'review_ready', onFinish: 'pull_request', mergeMode: 'manual' }}
+        task={makeTask({
+          status: 'review_ready',
+          config: { workflowId: 'wf-1', isMergeNode: true, runnerKind: 'merge' },
+          execution: { reviewUrl: 'https://github.com/example/repo/pull/2' },
+        })}
+        collapsed={false}
+        advancedExpanded={false}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        onToggleCollapsed={() => {}}
+        onToggleAdvanced={() => {}}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Approve Merge' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject Merge' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('github-merge-notice')).toHaveTextContent('does not merge');
+    expect(screen.getByTestId('inspector-pr-link')).toHaveAttribute('href', 'https://github.com/example/repo/pull/2');
+  });
+
+  it('keeps Approve Merge when Invoker merges the branch itself', () => {
+    render(
+      <WorkflowInspector
+        workflow={{ ...workflow, status: 'review_ready', onFinish: 'merge', mergeMode: 'manual' }}
         task={makeTask({
           status: 'review_ready',
           config: { workflowId: 'wf-1', isMergeNode: true, runnerKind: 'merge' },
@@ -828,7 +887,7 @@ describe('WorkflowInspector', () => {
     );
 
     expect(screen.getByRole('button', { name: 'Approve Merge' })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Reject Merge' })).toBeVisible();
+    expect(screen.queryByTestId('github-merge-notice')).not.toBeInTheDocument();
   });
 
   it('surfaces an executor-selection failure captured in pendingFixError so approve dispatch errors are visible', () => {
@@ -1034,6 +1093,7 @@ describe('WorkflowInspector', () => {
         />,
       );
 
+      fireEvent.click(screen.getByTestId('task-logs-toggle'));
       await waitFor(() => expect(screen.getByText('Preparing review workspace')).toBeInTheDocument());
       expect(screen.getByText('Merge gate failed')).toBeInTheDocument();
       await waitFor(() => expect(screen.getByText('Queued auto-fix with agent')).toBeInTheDocument());
@@ -1112,6 +1172,7 @@ describe('WorkflowInspector', () => {
         />,
       );
 
+      fireEvent.click(screen.getByTestId('task-logs-toggle'));
       await waitFor(() => expect(screen.getByTestId('task-log-error')).toHaveTextContent('Could not load logs. Retrying…'));
     } finally {
       delete (window as unknown as { invoker?: unknown }).invoker;

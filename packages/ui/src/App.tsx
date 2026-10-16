@@ -9,9 +9,10 @@
  * - Modals overlay when needed
  */
 
-import { useState, useCallback, useMemo, useEffect, useRef, useLayoutEffect, type RefObject } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef, useLayoutEffect, type MouseEvent as ReactMouseEvent, type RefObject } from 'react';
 import yaml from 'js-yaml';
 import type { ActionGraphNode, CursorModelDiscoverySummary, ExecutionDefaults, ExecutionHarnessOption, InAppPlanningChatResponse, InAppPlanningSessionStatus, InAppPlanningSessionSummary, InAppPlanningTurnOutcome, InvokerSetupRequest, InvokerSetupResult, PlanningConfirmationMode, PlanningPresetOption, PlanningPresetsResponse, ReviewGateQueryResponse, RuntimeStatus, StartReadyRequest, StartReadyResult, TerminalOutputEvent, TerminalSessionDescriptor, WorkflowMutationFailedEvent } from '@invoker/contracts';
+import { planningBindFailureLine, planningCloneReadyText } from '@invoker/contracts/planning-clone-status';
 import { resolvePlanningSubmitAction } from '@invoker/contracts/planning-surface';
 import type { TaskState, TaskReplacementDef, ExternalGatePolicyUpdate, WorkflowMeta, WorkflowStatus, WorkerActionSummary, WorkerLogEntry, WorkerStatusEntry } from './types.js';
 import type { SidebarSurface } from './lib/workflow-progress-surfaces.js';
@@ -44,7 +45,25 @@ import { BulkPoolReassignmentModal, type BulkPoolReassignmentResult } from './co
 import { WorkerDetailsPanel } from './components/WorkerDetailsPanel.js';
 import { WorkerDetailControl } from './components/WorkerDetailControl.js';
 import { WorkerActivityCard } from './components/WorkerActivityCard.js';
+import {
+  approvalDialogStillWaiting,
+  operatorDecisionFailureCopy,
+} from './lib/approval-decision-feedback.js';
+import { mergeGateLeavesMergeToGitHub } from './lib/merge-gate.js';
+import {
+  isOperatorDecisionFailure,
+  mutationFailureBannerMessage,
+} from './lib/mutation-failure-display.js';
+import {
+  attachPickerEntries,
+  attachedWorkflowNotice,
+  duplicateAttachMessage,
+  finishedWorkflowAttachOptions,
+  workflowDependsOnUpstream,
+  type PendingWorkflowAttach,
+} from './lib/attach-workflow-request.js';
 import { groupWorkflowCoreActivity } from './lib/workflow-core-activity.js';
+import { isWorkflowBuilt } from './lib/workflow-status.js';
 import { ActionGraphView } from './components/ActionGraphView.js';
 import { WorkflowStatusChips } from './components/WorkflowStatusChips.js';
 import { TerminalDrawer, type TerminalDrawerState } from './components/TerminalDrawer.js';
@@ -69,8 +88,10 @@ import {
   planningNeedsAttention,
   planningRepoStatusText,
   planningSessionFromSummary,
+  initialPlanningProgressLabel,
   planningSessionStatusLabel,
   planningSessionSummaryToView,
+  resolvePlanningProgressLabel,
   previewPlanningMessage,
   reconcileHydratedPlanningSessions,
   relativePlanningUpdatedAt,
@@ -84,7 +105,7 @@ import {
   type PlanningTerminalMode,
 } from './components/InvokerTerminal.js';
 import { WorkflowContextMenu, type ContextMenuCloseOptions } from './components/WorkflowContextMenu.js';
-import { MarkdownText } from './components/MarkdownText.js';
+import { PlanningDraftReview } from './components/PlanningDraftReview.js';
 import { Toaster, toast } from 'sonner';
 import { Trash2 } from 'lucide-react';
 import { Button } from './components/primitives/index.js';
@@ -112,12 +133,18 @@ import {
   type GraphCameraViewport,
   type GraphScope,
 } from './lib/graph-camera.js';
+import {
+  PLANNING_CONTEXT_PANEL_COLLAPSED_WIDTH,
+  clampPlanningContextPanelWidth,
+  readPlanningContextPanelWidth,
+  writePlanningContextPanelWidth,
+} from './lib/planning-context-panel-width.js';
 import type { SystemDiagnostics } from '@invoker/contracts';
 
 type ModalState =
   | { type: 'none' }
   | { type: 'input'; task: TaskState }
-  | { type: 'approval'; task: TaskState; action: 'approve' | 'reject' }
+  | { type: 'approval'; task: TaskState; action: 'approve' | 'reject'; decisionError?: string }
   | { type: 'experiment'; task: TaskState }
   | { type: 'replace'; task: TaskState }
   | { type: 'bulkPoolReassignment' };
@@ -595,6 +622,7 @@ export function App() {
   const planningPollFailureCountRef = useRef(0);
   const planningTurnGoneCountsRef = useRef<Map<string, number>>(new Map());
   const [planningStreamBySessionId, setPlanningStreamBySessionId] = useState<Record<string, PlanningStreamState>>({});
+  const [planningProgressLabelBySessionId, setPlanningProgressLabelBySessionId] = useState<Record<string, string>>({});
   const [planningPresetOptions, setPlanningPresetOptions] = useState<PlanningPresetOption[]>([]);
   const [planningPresetsLoading, setPlanningPresetsLoading] = useState(true);
   const [cursorDiscoverySummary, setCursorDiscoverySummary] = useState<CursorModelDiscoverySummary | undefined>();
@@ -610,6 +638,10 @@ export function App() {
     [activePlanningSessionId, planningSessions],
   );
   const activePlanningStream = planningStreamBySessionId[activePlanningSession.id] ?? null;
+  const activePlanningProgressLabel = resolvePlanningProgressLabel(
+    activePlanningStream,
+    planningProgressLabelBySessionId[activePlanningSession.id],
+  );
   const activePlanningConversationKey = activePlanningSession.conversationKey;
   const terminalLines = activePlanningSession.messages;
   const planningInput = activePlanningSession.input;
@@ -647,14 +679,13 @@ export function App() {
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus | null>(
     () => (typeof window !== 'undefined' ? window.__INVOKER_BOOTSTRAP__?.runtimeStatus ?? null : null),
   );
-  const activePlanningReadOnly = activePlanningSessionSubmitted || runtimeStatus?.readOnly === true;
-  const activePlanningWorkflowRunning = activePlanningSession.submittedWorkflowId
-    ? workflows.get(activePlanningSession.submittedWorkflowId)?.status === 'running'
-    : false;
-  const activePlanningRepoLocked = activePlanningSession.messages.some((message) => message.role !== 'system')
-    || Boolean(activePlanningSession.terminalSession)
-    || activePlanningSession.mode === 'tmux'
-    || activePlanningReadOnly;
+  const planningWindowReadOnly = runtimeStatus?.readOnly === true;
+  const activePlanningReadOnly = activePlanningSessionSubmitted || planningWindowReadOnly;
+  const submittedWorkflowStatus = activePlanningSession.submittedWorkflowId
+    ? workflows.get(activePlanningSession.submittedWorkflowId)?.status
+    : undefined;
+  const activePlanningWorkflowRunning = submittedWorkflowStatus === 'running';
+  const activePlanningWorkflowBuilt = isWorkflowBuilt(submittedWorkflowStatus);
   const planningRepoSuggestions = useMemo(() => {
     const repos = new Set<string>();
     for (const workflow of workflows.values()) {
@@ -689,9 +720,13 @@ export function App() {
   const [startReadyPreviewMode, setStartReadyPreviewMode] = useState<StartReadyRailModeId>('recreateFailed');
   // Transient, user-visible outcome line for a confirmed workflow detach.
   const [detachNotice, setDetachNotice] = useState<string | null>(null);
+  const [pendingAttach, setPendingAttach] = useState<PendingWorkflowAttach | null>(null);
   const [keyboardRegion, setKeyboardRegion] = useState<KeyboardRegion>('planning');
   const [previousGraphRegion, setPreviousGraphRegion] = useState<KeyboardRegion>('workflowGraph');
   const [planningContextCollapsed, setPlanningContextCollapsed] = useState(true);
+  const [planningContextPanelWidth, setPlanningContextPanelWidth] = useState(() => readPlanningContextPanelWidth());
+  const [planningContextResizing, setPlanningContextResizing] = useState(false);
+  const planningContextResizeStartRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const [planningSessionRailCollapsed, setPlanningSessionRailCollapsed] = useState(false);
   // Typed graph camera state. The graph viewport is user-owned after the
   // initial render: only explicit navigation commands (issued through the
@@ -897,9 +932,21 @@ export function App() {
       });
       const reconciledSessions = reconcileHydratedPlanningSessions(planningSessionsRef.current, admissibleRestored);
       const nextSessions = chatList.sessions.length === 0
-        ? reconciledSessions.map((session) => (session.id.startsWith('local-')
-          ? { ...session, repoUrl: repoBinding?.repoUrl, baseBranch: repoBinding?.baseBranch }
-          : session))
+        ? reconciledSessions.map((session) => {
+          if (!session.id.startsWith('local-') || session.repoUrl) return session;
+          if (!repoBinding?.repoUrl) {
+            return {
+              ...session,
+              repoInput: undefined,
+              baseBranchInput: undefined,
+            };
+          }
+          return {
+            ...session,
+            repoInput: session.repoInput ?? repoBinding.repoUrl,
+            baseBranchInput: session.baseBranchInput ?? repoBinding.baseBranch,
+          };
+        })
         : reconciledSessions;
       planningSessionsRef.current = nextSessions;
       setPlanningSessions(nextSessions);
@@ -1093,7 +1140,7 @@ export function App() {
         applyTurnOutcomeRef.current(sessionId, event.turnId, event.turn);
         return;
       }
-      if (!sessionId || typeof event.chunk !== 'string' || !event.chunk) return;
+      if (!sessionId) return;
 
       const sessions = planningSessionsRef.current;
       const isStreamingTarget = (session: PlanningSessionView): boolean => (
@@ -1110,15 +1157,45 @@ export function App() {
         && isStreamingTarget(session)
       ));
       const localBusySession = sessions.find((session) => session.id.startsWith('local-') && isStreamingTarget(session));
-      const targetSessionId = matchingSession && isStreamingTarget(matchingSession)
+      let targetSessionId = matchingSession && isStreamingTarget(matchingSession)
         ? matchingSession.id
         : aliasedSession && isStreamingTarget(aliasedSession)
           ? aliasedSession.id
           : activeLocalSession?.id ?? localBusySession?.id;
+      if (!targetSessionId && typeof event.statusLabel === 'string' && event.statusLabel.trim()) {
+        if (matchingSession) targetSessionId = matchingSession.id;
+        else if (aliasedSession) targetSessionId = aliasedSession.id;
+        else if (sessions.some((session) => session.id === sessionId)) targetSessionId = sessionId;
+      }
       if (!targetSessionId) return;
       if (!matchingSession) {
         planningStreamSessionAliasesRef.current.set(sessionId, targetSessionId);
       }
+
+      const statusLabel = typeof event.statusLabel === 'string' ? event.statusLabel.trim() : '';
+      if (statusLabel) {
+        setPlanningProgressLabelBySessionId((prev) => {
+          const next = { ...prev };
+          for (const id of [targetSessionId, sessionId]) {
+            if (id) next[id] = statusLabel;
+          }
+          return next;
+        });
+        setPlanningStreamBySessionId((prev) => {
+          const current = prev[targetSessionId];
+          return {
+            ...prev,
+            [targetSessionId]: {
+              text: current?.text ?? '',
+              status: current?.status ?? 'streaming',
+              statusLabel,
+            },
+          };
+        });
+        return;
+      }
+
+      if (typeof event.chunk !== 'string' || !event.chunk) return;
 
       setPlanningStreamBySessionId((prev) => {
         const current = prev[targetSessionId];
@@ -1127,6 +1204,7 @@ export function App() {
           [targetSessionId]: {
             text: `${current?.text ?? ''}${event.chunk}`,
             status: 'streaming',
+            statusLabel: current?.statusLabel,
           },
         };
       });
@@ -1455,25 +1533,6 @@ export function App() {
     return () => clearTimeout(timer);
   }, [selectedWorkflowId, selectedWorkflowPresent]);
 
-  useEffect(() => {
-    if (selectedTask?.config.workflowId) {
-      setWorkflowSelectionDismissed(false);
-      setSelectedWorkflowId(selectedTask.config.workflowId);
-      return;
-    }
-    if (selectedWorkflowId && (workflows.has(selectedWorkflowId) || selectedWorkflowTaskCount > 0)) {
-      return;
-    }
-    if (workflowSelectionDismissed) {
-      return;
-    }
-    if (selectedWorkflowId && !selectedWorkflowVanished) {
-      return;
-    }
-    const firstWorkflowId = workflows.keys().next().value as string | undefined;
-    setSelectedWorkflowId(firstWorkflowId ?? null);
-  }, [selectedTask, selectedWorkflowId, selectedWorkflowTaskCount, selectedWorkflowVanished, workflowSelectionDismissed, workflows]);
-
   const handleStatusClick = useCallback((filterKey: WorkflowStatus, event: React.MouseEvent) => {
     setStatusFilters(prev => {
       if (event.ctrlKey || event.metaKey) {
@@ -1511,6 +1570,27 @@ export function App() {
     () => getAttentionTaskEntries(tasks, workflows, attentionTaskIdsWithFailures),
     [tasks, workflows, attentionTaskIdsWithFailures],
   );
+  useEffect(() => {
+    if (selectedTask?.config.workflowId) {
+      setWorkflowSelectionDismissed(false);
+      setSelectedWorkflowId(selectedTask.config.workflowId);
+      return;
+    }
+    if (sidebarSurface === 'attention' && attentionEntries.length === 0) {
+      return;
+    }
+    if (selectedWorkflowId && (workflows.has(selectedWorkflowId) || selectedWorkflowTaskCount > 0)) {
+      return;
+    }
+    if (workflowSelectionDismissed) {
+      return;
+    }
+    if (selectedWorkflowId && !selectedWorkflowVanished) {
+      return;
+    }
+    const firstWorkflowId = workflows.keys().next().value as string | undefined;
+    setSelectedWorkflowId(firstWorkflowId ?? null);
+  }, [attentionEntries.length, selectedTask, selectedWorkflowId, selectedWorkflowTaskCount, selectedWorkflowVanished, sidebarSurface, workflowSelectionDismissed, workflows]);
   const runningEntries = useMemo(() => getRunningTaskEntries(tasks, workflows, queueStatus), [tasks, workflows, queueStatus]);
   const runningWorkflowCount = useMemo(() => {
     const workflowIds = new Set<string>();
@@ -1634,12 +1714,34 @@ export function App() {
         if (task) {
           selectTaskById(task.id);
         }
+        if (isOperatorDecisionFailure(event)) {
+          const copy = operatorDecisionFailureCopy(event);
+          setModal((current) => (
+            current.type === 'approval' && current.task.id === failedTaskId
+              ? { ...current, decisionError: copy.message }
+              : current
+          ));
+          notifyMutationError(copy.title, copy.message);
+        }
+        return;
+      }
+      if (event.headlessCommand === 'attach-workflow') {
+        setPendingAttach(null);
+        setDetachNotice(null);
+        notifyMutationError('Attach failed', mutationFailureBannerMessage(event));
         return;
       }
       notifyMutationError('Mutation failed', event.message);
     });
     return () => { unsubscribe?.(); };
   }, [selectTaskById]);
+
+  useEffect(() => {
+    if (modal.type !== 'approval') return;
+    const liveTask = tasks.get(modal.task.id);
+    if (!liveTask || approvalDialogStillWaiting(liveTask.status)) return;
+    setModal({ type: 'none' });
+  }, [modal, tasks]);
 
   const selectRelativeNode = useCallback((direction: 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight') => {
     const inTaskGraph = keyboardRegion === 'taskGraph';
@@ -2019,10 +2121,8 @@ export function App() {
 
     if (sidebarSurface === 'attention') {
       if (!attentionEntries.length) {
-        if (selectedTaskId !== null || selectedWorkflowId !== null) {
+        if (selectedTaskId !== null) {
           setSelectedTaskId(null);
-          setSelectedWorkflowId(null);
-          setWorkflowSelectionDismissed(false);
         }
         return;
       }
@@ -2272,11 +2372,10 @@ export function App() {
       setDetachNotice(
         `Detached "${downstreamName}" from upstream "${upstreamName}". The active dependency was removed; detached lineage remains visible.`,
       );
-      refreshTaskGraph();
     } catch (err) {
       notifyMutationError('Detach Workflow failed:', err);
     }
-  }, [workflows, refreshTaskGraph]);
+  }, [workflows]);
 
   const handleAttachWorkflow = useCallback((workflowId: string) => {
     setWorkflowContextMenu(null);
@@ -2290,28 +2389,40 @@ export function App() {
     const workflow = workflows.get(workflowId);
     const downstreamName = workflow?.name ?? workflowId;
     const upstreamName = workflows.get(upstreamWorkflowId)?.name ?? upstreamWorkflowId;
+    if (workflowDependsOnUpstream(workflow, upstreamWorkflowId)) {
+      notifyMutationError('Attach failed', duplicateAttachMessage(downstreamName, upstreamName));
+      return;
+    }
     const confirmed = window.confirm(
       `Attach "${downstreamName}" to upstream "${upstreamName}"?\n\n` +
       `This adds a dependency so "${downstreamName}" waits on "${upstreamName}"'s merge. ` +
+      `Nothing runs automatically until you use Start ready work. ` +
       `Tasks that already ran ahead of this gate are left untouched.`,
     );
     if (!confirmed) return;
     try {
-      await window.invoker?.attachWorkflow(workflowId, upstreamWorkflowId);
-      setDetachNotice(
-        `Attached "${downstreamName}" to upstream "${upstreamName}". The dependency was added.`,
-      );
-      refreshTaskGraph();
+      const options = finishedWorkflowAttachOptions(workflow?.status);
+      await window.invoker?.attachWorkflow(workflowId, upstreamWorkflowId, options);
+      setPendingAttach({ workflowId, upstreamWorkflowId, downstreamName, upstreamName });
     } catch (err) {
       notifyMutationError('Attach Workflow failed:', err);
     }
-  }, [workflows, refreshTaskGraph, attachPickerWorkflowId]);
+  }, [workflows, attachPickerWorkflowId]);
 
   useEffect(() => {
     if (!detachNotice) return;
     const timer = setTimeout(() => setDetachNotice(null), 6000);
     return () => clearTimeout(timer);
   }, [detachNotice]);
+
+  useEffect(() => {
+    if (!pendingAttach) return;
+    if (!workflowDependsOnUpstream(workflows.get(pendingAttach.workflowId), pendingAttach.upstreamWorkflowId)) {
+      return;
+    }
+    setDetachNotice(attachedWorkflowNotice(pendingAttach));
+    setPendingAttach(null);
+  }, [pendingAttach, workflows]);
 
   const handleFix = useCallback(async (taskId: string, agentName: string) => {
     setContextMenu(null);
@@ -2420,6 +2531,68 @@ export function App() {
     });
   }, []);
 
+  const clearPlanningProgressLabelForSessionIds = useCallback((sessionIds: Array<string | null | undefined>) => {
+    const ids = new Set(sessionIds.filter((sessionId): sessionId is string => Boolean(sessionId)));
+    if (ids.size === 0) return;
+    setPlanningProgressLabelBySessionId((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const id of ids) {
+        if (id in next) {
+          delete next[id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, []);
+
+  const migratePlanningStreamStateForSessionId = useCallback((previousSessionId: string, nextSessionId: string) => {
+    if (!previousSessionId || !nextSessionId || previousSessionId === nextSessionId) return;
+    setPlanningStreamBySessionId((prev) => {
+      if (!(previousSessionId in prev) || nextSessionId in prev) return prev;
+      const next = { ...prev, [nextSessionId]: prev[previousSessionId] };
+      delete next[previousSessionId];
+      return next;
+    });
+    setPlanningProgressLabelBySessionId((prev) => {
+      if (!(previousSessionId in prev)) return prev;
+      const next = { ...prev, [nextSessionId]: prev[nextSessionId] ?? prev[previousSessionId] };
+      delete next[previousSessionId];
+      return next;
+    });
+  }, []);
+
+  const rememberPlanningProgressLabel = useCallback((sessionIds: Array<string | null | undefined>, label: string) => {
+    const trimmed = label.trim();
+    if (!trimmed) return;
+    const ids = new Set(sessionIds.filter((sessionId): sessionId is string => Boolean(sessionId)));
+    if (ids.size === 0) return;
+    setPlanningProgressLabelBySessionId((prev) => {
+      const next = { ...prev };
+      for (const id of ids) next[id] = trimmed;
+      return next;
+    });
+  }, []);
+
+  const seedPlanningStreamProgress = useCallback((
+    sessionIds: Array<string | null | undefined>,
+    label: string,
+  ) => {
+    const trimmed = label.trim();
+    if (!trimmed) return;
+    const ids = new Set(sessionIds.filter((sessionId): sessionId is string => Boolean(sessionId)));
+    if (ids.size === 0) return;
+    rememberPlanningProgressLabel([...ids], trimmed);
+    setPlanningStreamBySessionId((prev) => {
+      const next = { ...prev };
+      for (const id of ids) {
+        next[id] = { text: next[id]?.text ?? '', status: 'streaming', statusLabel: trimmed };
+      }
+      return next;
+    });
+  }, [rememberPlanningProgressLabel]);
+
   const forgetPlanningStreamAliasesForSessionIds = useCallback((sessionIds: Array<string | null | undefined>) => {
     const ids = new Set(sessionIds.filter((sessionId): sessionId is string => Boolean(sessionId)));
     if (ids.size === 0) return;
@@ -2462,7 +2635,7 @@ export function App() {
     const updatedAt = new Date().toISOString();
     const appendLine = (session: PlanningSessionView): PlanningSessionView => ({
       ...session,
-      messages: [...session.messages, { id, text, role, tone }],
+      messages: [...session.messages, { id, text, role, tone, createdAt: updatedAt }],
       updatedAt,
     });
     if (targetSessionId) {
@@ -2498,6 +2671,7 @@ export function App() {
             id: replyLineId,
             text: outcome.reply,
             role: 'assistant' as const,
+            createdAt: updatedAt,
             ...(outcome.reasoning ? { reasoning: outcome.reasoning } : {}),
           }],
           draftPlanAvailable: outcome.draftPlanAvailable,
@@ -2511,6 +2685,7 @@ export function App() {
       planningSessionsRef.current = planningSessionsRef.current.map(applyCompleted);
       setPlanningSessions((prev) => prev.map(applyCompleted));
       clearPlanningStreamForSessionIds([sessionId, targetId]);
+      clearPlanningProgressLabelForSessionIds([sessionId, targetId]);
       forgetPlanningStreamAliasesForSessionIds([sessionId, targetId]);
       pendingPlanningStreamSessionIdsRef.current.delete(sessionId);
       pendingPlanningStreamSessionIdsRef.current.delete(targetId);
@@ -2545,10 +2720,16 @@ export function App() {
       }
       keepPlanningStreamFailureForSessionIds([sessionId, targetId], outcome.error);
     }
+    clearPlanningProgressLabelForSessionIds([sessionId, targetId]);
     forgetPlanningStreamAliasesForSessionIds([sessionId, targetId]);
     pendingPlanningStreamSessionIdsRef.current.delete(sessionId);
     pendingPlanningStreamSessionIdsRef.current.delete(targetId);
-  }, [appendTerminalLine, forgetPlanningStreamAliasesForSessionIds, keepPlanningStreamFailureForSessionIds]);
+  }, [
+    appendTerminalLine,
+    clearPlanningProgressLabelForSessionIds,
+    forgetPlanningStreamAliasesForSessionIds,
+    keepPlanningStreamFailureForSessionIds,
+  ]);
 
   useEffect(() => {
     applyTurnOutcomeRef.current = applyPlanningTurnOutcome;
@@ -2603,6 +2784,7 @@ export function App() {
       setActivePlanningSessionId((currentSessionId) => (
         currentSessionId === previousSessionId ? result.sessionId : currentSessionId
       ));
+      migratePlanningStreamStateForSessionId(previousSessionId, result.sessionId);
       applyPlanningTurnOutcome(result.sessionId, turnId, {
         status: 'completed',
         reply: result.reply,
@@ -2636,6 +2818,7 @@ export function App() {
         setActivePlanningSessionId((currentSessionId) => (
           currentSessionId === previousSessionId ? failedSessionId : currentSessionId
         ));
+        migratePlanningStreamStateForSessionId(previousSessionId, failedSessionId);
       }
       applyPlanningTurnOutcome(result.sessionId ?? previousSessionId, turnId, { status: 'failed', error: result.error });
       return;
@@ -2668,6 +2851,7 @@ export function App() {
     appendTerminalLine,
     forgetPlanningStreamAliasesForSessionIds,
     keepPlanningStreamFailureForSessionIds,
+    migratePlanningStreamStateForSessionId,
     updatePlanningSessionById,
   ]);
 
@@ -2826,6 +3010,33 @@ export function App() {
     setReviewDraftSessionId(null);
   }, [activePlanningSessionId, appendTerminalLine]);
 
+  const handlePlanningContextResizeMouseDown = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (planningContextCollapsed || planningContextResizeStartRef.current) return;
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = planningContextPanelWidth;
+    planningContextResizeStartRef.current = { startX, startWidth };
+    setPlanningContextResizing(true);
+
+    const onMouseMove = (moveEvent: MouseEvent): void => {
+      if (!planningContextResizeStartRef.current) return;
+      setPlanningContextPanelWidth(
+        clampPlanningContextPanelWidth(startWidth + (startX - moveEvent.clientX)),
+      );
+    };
+    const onMouseUp = (): void => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      planningContextResizeStartRef.current = null;
+      setPlanningContextResizing(false);
+      setPlanningContextPanelWidth((current) => writePlanningContextPanelWidth(current));
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  }, [planningContextCollapsed, planningContextPanelWidth]);
+
   const handlePlanningDiscardDraft = useCallback(async () => {
     const targetSessionId = planningSessionId;
     if (!targetSessionId) return;
@@ -2860,11 +3071,28 @@ export function App() {
       ...session,
       repoInput: value,
       repoError: null,
+      repoNotice: null,
+    }));
+  }, [activePlanningSession.id, updatePlanningSessionById]);
+
+  const handlePlanningBaseBranchInputChange = useCallback((value: string) => {
+    updatePlanningSessionById(activePlanningSession.id, (session) => ({
+      ...session,
+      baseBranchInput: value,
+      repoError: null,
+      repoNotice: null,
     }));
   }, [activePlanningSession.id, updatePlanningSessionById]);
 
   const planningRepoCommitInFlightRef = useRef<Promise<{ ok: boolean; sessionId: string | null; error?: string }> | null>(null);
   const [planningRepoBindingId, setPlanningRepoBindingId] = useState<string | null>(null);
+  const [planningRepoEditing, setPlanningRepoEditing] = useState(false);
+  const planningRepoEditingRef = useRef(false);
+  planningRepoEditingRef.current = planningRepoEditing;
+
+  useEffect(() => {
+    setPlanningRepoEditing(false);
+  }, [activePlanningSessionId]);
 
   const commitPlanningRepo = useCallback((): Promise<{ ok: boolean; sessionId: string | null; error?: string }> => {
     // Clicking Send or Tmux blurs the repo input, so the blur commit and the
@@ -2873,30 +3101,42 @@ export function App() {
     if (inFlight) return inFlight;
 
     const run = (async (): Promise<{ ok: boolean; sessionId: string | null; error?: string }> => {
+      const EMPTY_REPO_EDIT_MESSAGE = 'Enter a repository before checking it again.';
       // Read the latest view state from refs: render closures go stale across
       // the awaits below and would re-materialize an already-swapped session.
       const viewSessionId = activePlanningSessionIdRef.current;
       const session = planningSessionsRef.current.find((current) => current.id === viewSessionId);
       if (!session) return { ok: true, sessionId: null };
       const currentBackendId = session.id.startsWith('local-') ? null : session.id;
-      const locked = session.messages.some((message) => message.role !== 'system')
-        || Boolean(session.terminalSession)
-        || session.mode === 'tmux'
-        || session.status === 'submitted'
-        || runtimeStatus?.readOnly === true;
-      const pending = (session.repoInput ?? '').trim();
-      if (locked || !pending || pending === (session.repoUrl ?? '')) {
+      const readOnlySession = session.status === 'submitted' || runtimeStatus?.readOnly === true;
+      const pending = (session.repoInput ?? session.repoUrl ?? '').trim();
+      const pendingBranch = (session.baseBranchInput ?? '').trim();
+      const urlUnchanged = Boolean(session.repoUrl) && pending === session.repoUrl;
+      const branchUnchanged = pendingBranch.length === 0 || pendingBranch === (session.baseBranch ?? '');
+      if (readOnlySession) {
         return { ok: true, sessionId: currentBackendId };
       }
 
       let sessionId = currentBackendId;
       let viewId = session.id;
       const failBind = (id: string, sessionIdForResult: string | null, message: string): { ok: false; sessionId: string | null; error: string } => {
-        updatePlanningSessionById(id, (current) => ({ ...current, repoError: message }));
-        appendTerminalLine(`Could not bind repository: ${message}`, 'system', 'error', id);
+        const line = planningBindFailureLine(message);
+        updatePlanningSessionById(id, (current) => ({ ...current, repoError: line, repoNotice: null }));
+        appendTerminalLine(line, 'system', 'error', id);
         return { ok: false, sessionId: sessionIdForResult, error: message };
       };
+      if (!pending) {
+        if (!planningRepoEditingRef.current) {
+          return { ok: true, sessionId: currentBackendId };
+        }
+        return failBind(viewId, currentBackendId, EMPTY_REPO_EDIT_MESSAGE);
+      }
+      if (urlUnchanged && branchUnchanged) {
+        setPlanningRepoEditing(false);
+        return { ok: true, sessionId: currentBackendId };
+      }
       setPlanningRepoBindingId(viewId);
+      updatePlanningSessionById(viewId, (current) => ({ ...current, repoError: null, repoNotice: null }));
       if (!sessionId) {
         if (!invoker?.planningChatCreate) {
           return failBind(viewId, null, 'Planner is not available.');
@@ -2919,7 +3159,9 @@ export function App() {
                   input: current.input,
                   busy: false,
                   repoInput: current.repoInput,
+                  baseBranchInput: current.baseBranchInput,
                   repoError: null,
+                  repoNotice: null,
                 })
               : current
           );
@@ -2944,17 +3186,28 @@ export function App() {
         return failBind(viewId, sessionId, 'Repo binding is not available.');
       }
       try {
-        const result = await invoker.planningChatRebindRepo({ sessionId, repoUrl: pending });
+        const result = await invoker.planningChatRebindRepo({
+          sessionId,
+          repoUrl: pending,
+          ...(pendingBranch ? { baseBranch: pendingBranch } : {}),
+        });
         if (!result.ok) {
           return failBind(viewId, sessionId, result.error);
         }
+        const resolvedBranch = result.baseBranch || pendingBranch;
+        const notice = planningCloneReadyText(pending, resolvedBranch, result.action);
         updatePlanningSessionById(viewId, (current) => ({
           ...current,
           repoUrl: pending,
+          baseBranch: resolvedBranch || current.baseBranch,
           baseCommit: undefined,
           repoInput: undefined,
+          baseBranchInput: undefined,
           repoError: null,
+          repoNotice: notice,
         }));
+        appendTerminalLine(notice, 'system', 'success', viewId);
+        setPlanningRepoEditing(false);
         return { ok: true, sessionId };
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to bind the repository.';
@@ -2979,15 +3232,42 @@ export function App() {
     updatePlanningSessionById,
   ]);
 
+  const startPlanningRepoEdit = useCallback(() => {
+    const session = planningSessionsRef.current.find((current) => current.id === activePlanningSessionIdRef.current);
+    const typedBranch = (session?.baseBranchInput ?? '').trim();
+    if (session && !typedBranch && session.baseBranch) {
+      updatePlanningSessionById(session.id, (current) => ({
+        ...current,
+        baseBranchInput: current.baseBranch ?? '',
+      }));
+    }
+    setPlanningRepoEditing(true);
+  }, [updatePlanningSessionById]);
+
   const handlePlanningSubmit = useCallback(async () => {
     const input = planningInput.trim();
-    if (!input || activePlanningSessionBusy || activePlanningReadOnly) return;
+    if (!input || activePlanningSessionBusy || planningWindowReadOnly) return;
 
+    const liveSession = planningSessionsRef.current.find((session) => session.id === activePlanningSessionIdRef.current);
+    const pendingRepoInput = (liveSession?.repoInput ?? activePlanningSession.repoInput ?? '').trim();
+    const boundRepoUrl = (liveSession?.repoUrl ?? activePlanningSession.repoUrl ?? '').trim();
+    if (!boundRepoUrl && !pendingRepoInput) {
+      appendTerminalLine(
+        'Choose a repository before planning. Invoker will not target a default checkout or an unspecified repo.',
+        'system',
+        'error',
+      );
+      return;
+    }
+
+    const pendingBranch = (liveSession?.baseBranchInput ?? activePlanningSession.baseBranchInput ?? '').trim();
+    const boundBranch = liveSession?.baseBranch ?? activePlanningSession.baseBranch ?? '';
+    const branchChanged = pendingBranch.length > 0 && pendingBranch !== boundBranch;
+    const repoChanged = pendingRepoInput.length > 0 && pendingRepoInput !== boundRepoUrl;
     let sendSessionId = planningSessionId;
     let activeViewId = activePlanningSessionId;
     let explicitRepoBindingApplied = false;
-    const pendingRepoInput = (activePlanningSession.repoInput ?? '').trim();
-    if (!activePlanningRepoLocked && pendingRepoInput && pendingRepoInput !== (activePlanningSession.repoUrl ?? '')) {
+    if (planningRepoEditingRef.current || repoChanged || branchChanged) {
       const bind = await commitPlanningRepo();
       if (!bind.ok) return;
       if (bind.sessionId) {
@@ -3009,6 +3289,7 @@ export function App() {
           'Create or submit a plan before starting ready work.',
           'system',
           'error',
+          activeViewId,
         );
         return;
       }
@@ -3066,7 +3347,12 @@ export function App() {
     const previousSessionId = activeViewId;
     pendingPlanningStreamSessionIdsRef.current.add(previousSessionId);
     clearPlanningStreamForSessionIds([previousSessionId, sendSessionId]);
+    clearPlanningProgressLabelForSessionIds([previousSessionId, sendSessionId]);
     forgetPlanningStreamAliasesForSessionIds([previousSessionId, sendSessionId]);
+    const activePreset = planningPresetOptions.find((option) => option.key === selectedPlanningPresetKey)
+      ?? planningPresetOptions[0];
+    const initialProgressLabel = initialPlanningProgressLabel(activePreset?.label ?? activePreset?.tool ?? 'Cursor');
+    seedPlanningStreamProgress([previousSessionId, sendSessionId], initialProgressLabel);
     markPlanningTurnRunning(previousSessionId, turnId);
     try {
       const result = await invoker.planningChatSend(request);
@@ -3080,10 +3366,10 @@ export function App() {
   }, [
     activePlanningSessionBusy,
     activePlanningSessionId,
-    activePlanningReadOnly,
-    activePlanningRepoLocked,
+    planningWindowReadOnly,
     appendTerminalLine,
     commitPlanningRepo,
+    clearPlanningProgressLabelForSessionIds,
     clearPlanningStreamForSessionIds,
     forgetPlanningStreamAliasesForSessionIds,
     handlePlanningSendResult,
@@ -3092,7 +3378,10 @@ export function App() {
     hasLoadedPlan,
     invoker,
     markPlanningTurnRunning,
+    planningPresetOptions,
     refreshPlanningSessionsNow,
+    seedPlanningStreamProgress,
+    selectedPlanningPresetKey,
     activePlanningSession.draftPlanAvailable,
     activePlanningSession.messages.length,
     activePlanningSession.repoInput,
@@ -3116,6 +3405,15 @@ export function App() {
     if (!lastUserLine || !invoker?.planningChatSend) return;
     const turnId = session.activeTurnId;
     const previousSessionId = session.id;
+    pendingPlanningStreamSessionIdsRef.current.add(previousSessionId);
+    clearPlanningStreamForSessionIds([previousSessionId]);
+    clearPlanningProgressLabelForSessionIds([previousSessionId]);
+    const activePreset = planningPresetOptions.find((option) => option.key === selectedPlanningPresetKey)
+      ?? planningPresetOptions[0];
+    seedPlanningStreamProgress(
+      [previousSessionId],
+      initialPlanningProgressLabel(activePreset?.label ?? activePreset?.tool ?? 'Cursor'),
+    );
     markPlanningTurnRunning(previousSessionId, turnId);
     try {
       const result = await invoker.planningChatSend({
@@ -3134,10 +3432,14 @@ export function App() {
     }
   }, [
     activePlanningSession,
+    clearPlanningProgressLabelForSessionIds,
+    clearPlanningStreamForSessionIds,
     handlePlanningSendResult,
     invoker,
     markPlanningTurnRunning,
+    planningPresetOptions,
     refreshPlanningSessionsNow,
+    seedPlanningStreamProgress,
     selectedPlanningConfirmationMode,
     selectedPlanningPresetKey,
   ]);
@@ -3233,17 +3535,17 @@ export function App() {
   }, [clearPlanningStreamForSessionIds, forgetPlanningStreamAliasesForSessionIds, makeFreshLocalPlanningSession]);
 
   const handleDeletePlanningSession = useCallback((sessionId: string) => {
-    if (activePlanningReadOnly) {
+    if (planningWindowReadOnly) {
       return;
     }
     if (!sessionId.startsWith('local-')) {
       void invoker?.planningChatDelete?.({ sessionId });
     }
     removePlanningSessionsById([sessionId]);
-  }, [activePlanningReadOnly, invoker, removePlanningSessionsById]);
+  }, [planningWindowReadOnly, invoker, removePlanningSessionsById]);
 
   const handleClearSubmittedPlanningSessions = useCallback(() => {
-    if (activePlanningReadOnly) {
+    if (planningWindowReadOnly) {
       return;
     }
     const confirmed = window.confirm('Clear all submitted planning chats? This cannot be undone.');
@@ -3254,7 +3556,7 @@ export function App() {
     if (submittedIds.length === 0) return;
     void invoker?.planningChatDeleteSubmitted?.();
     removePlanningSessionsById(submittedIds);
-  }, [activePlanningReadOnly, invoker, removePlanningSessionsById]);
+  }, [planningWindowReadOnly, invoker, removePlanningSessionsById]);
 
   const handlePlanningModeChange = useCallback(async (mode: PlanningTerminalMode) => {
     const sourceSession = activePlanningSession;
@@ -3858,8 +4160,10 @@ export function App() {
   }, []);
 
   const openApprovalModal = useCallback((task: TaskState) => {
+    const workflow = task.config.workflowId ? workflows.get(task.config.workflowId) : undefined;
+    if (mergeGateLeavesMergeToGitHub(task, workflow)) return;
     setModal({ type: 'approval', task, action: 'approve' });
-  }, []);
+  }, [workflows]);
 
   const openRejectModal = useCallback((task: TaskState) => {
     setModal({ type: 'approval', task, action: 'reject' });
@@ -4145,7 +4449,7 @@ export function App() {
           dragHandleTestId="selected-workflow-mini-dag-drag-handle"
           title={`${displayedSelectedWorkflowGraph.workflow.name} task DAG`}
           boundsRef={graphSurfaceRef as unknown as RefObject<HTMLElement>}
-          contentClassName="min-h-0 h-[180px] overflow-hidden"
+          contentClassName="min-h-0 h-full overflow-hidden"
         >
           {graphBody}
         </FloatingGraphPanel>
@@ -4567,7 +4871,7 @@ export function App() {
                   </div>
                 </div>
               </button>
-              {!activePlanningReadOnly && (
+              {!planningWindowReadOnly && (
                 <button
                   type="button"
                   aria-label="Delete planning chat"
@@ -4600,11 +4904,26 @@ export function App() {
       draftPlanSummary ? [{ workflow: null, tasks: draftPlanSummary.steps }] : []
     );
     const keptDraft = keptPlanningDraftSessionIds.has(activePlanningSession.id);
+    const panelWidth = planningContextCollapsed
+      ? PLANNING_CONTEXT_PANEL_COLLAPSED_WIDTH
+      : planningContextPanelWidth;
     return (
       <aside
         data-testid="planning-context-panel"
-        className={`${planningContextCollapsed ? 'w-16' : 'w-72'} flex h-full min-h-0 shrink-0 flex-col border-l border-border bg-card/60 transition-all duration-150`}
+        style={{ width: panelWidth }}
+        className={`relative flex h-full min-h-0 shrink-0 flex-col border-l border-border bg-card/60 ${planningContextResizing ? '' : 'transition-[width] duration-150'}`}
       >
+        {!planningContextCollapsed && (
+          <div
+            data-testid="planning-context-resize-handle"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize review draft panel"
+            aria-valuenow={planningContextPanelWidth}
+            onMouseDown={handlePlanningContextResizeMouseDown}
+            className="absolute inset-y-0 left-0 z-10 w-1.5 -translate-x-1/2 cursor-col-resize touch-none hover:bg-border/80"
+          />
+        )}
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2.5">
           {!planningContextCollapsed && (
             <h2 className="text-sm font-semibold text-foreground">{activeDraftReviewOpen ? 'Review draft' : 'Current plan'}</h2>
@@ -4620,67 +4939,17 @@ export function App() {
           </button>
         </div>
         {!planningContextCollapsed && (
-          activeDraftReviewOpen ? (
-            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4 text-sm">
-              <p data-testid="planning-draft-locked-note" className="text-xs text-muted-foreground">
-                This draft is locked — critique in chat, or ask Invoker to re-draft, to change it.
-              </p>
-              {draftTaskGroups.map((group, groupIndex) => (
-                <section key={`${group.workflow ?? 'plan'}-${groupIndex}`} data-testid="draft-task-group">
-                  {group.workflow && <h3 className="text-xs font-medium text-foreground">{group.workflow}</h3>}
-                  <ul className={group.workflow ? 'mt-2 space-y-1.5' : 'space-y-1.5'}>
-                    {group.tasks.map((task, taskIndex) => (
-                      <li key={`${task}-${taskIndex}`} data-testid="draft-step-summary" className="text-xs leading-5 text-muted-foreground">
-                        <MarkdownText text={task} />
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              ))}
-              {draftPlanText && (
-                <pre data-testid="draft-raw-yaml" className="max-h-56 overflow-auto rounded-md border border-border bg-background p-3 text-[11px] leading-5 text-muted-foreground">
-                  {draftPlanText}
-                </pre>
-              )}
-              {activePlanningSession.confirmationMode === 'require' && (
-                <div className="grid gap-2">
-                  <Button
-                    type="button"
-                    data-testid="planning-create-workflow"
-                    onClick={() => void handlePlanningSubmitDraft()}
-                    className="w-full"
-                  >
-                    Create workflow
-                  </Button>
-                  {keptDraft ? (
-                    <button
-                      type="button"
-                      data-testid="planning-discard-draft"
-                      onClick={() => void handlePlanningDiscardDraft()}
-                      className="w-full rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-secondary"
-                    >
-                      Discard draft
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      data-testid="planning-cancel-review"
-                      onClick={handlePlanningCancelReview}
-                      className="w-full rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-secondary"
-                    >
-                      Cancel
-                    </button>
-                  )}
-                </div>
-              )}
-              <button
-                type="button"
-                onClick={() => navigatePlanGraphPreservingViewport('planning-draft-review')}
-                className="w-full rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-secondary"
-              >
-                Open graph
-              </button>
-            </div>
+          activeDraftReviewOpen && draftPlanSummary ? (
+            <PlanningDraftReview
+              draftPlanSummary={draftPlanSummary}
+              draftTaskGroups={draftTaskGroups}
+              draftPlanText={draftPlanText}
+              confirmationMode={activePlanningSession.confirmationMode}
+              keptDraft={keptDraft}
+              onCreateWorkflow={() => void handlePlanningSubmitDraft()}
+              onDiscardDraft={() => void handlePlanningDiscardDraft()}
+              onCancelReview={handlePlanningCancelReview}
+            />
           ) : (
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4 text-sm">
               <div>
@@ -4711,7 +4980,7 @@ export function App() {
                   <p className="mt-1 text-foreground">{activePlanningSession.submittedPlanName}</p>
                 </div>
               )}
-              {(draftPlanAvailable || activePlanningSession.status === 'submitted') && (
+              {(draftPlanAvailable || activePlanningSession.submittedWorkflowId || activePlanningSession.status === 'submitted') && (
                 <button
                   type="button"
                   data-testid="planning-context-open-graph"
@@ -4783,7 +5052,7 @@ export function App() {
                   variant="outline"
                   size="sm"
                   onClick={handleClearSubmittedPlanningSessions}
-                  disabled={activePlanningReadOnly || submittedPlanningSessionCount === 0}
+                  disabled={planningWindowReadOnly || submittedPlanningSessionCount === 0}
                 >
                   Clear submitted
                 </Button>
@@ -4806,7 +5075,7 @@ export function App() {
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <span className="rounded-full border border-border bg-background px-2.5 py-1 text-[11px] text-muted-foreground">
-              {planningSessionStatusLabel(activePlanningSession)}
+              {planningSessionStatusLabel(activePlanningSession, activePlanningProgressLabel)}
             </span>
             {setupIncomplete && (
               <button
@@ -4845,19 +5114,27 @@ export function App() {
             draftReviewOpen={activeDraftReviewOpen}
             draftPlanSummary={draftPlanSummary}
             planningStream={activePlanningStream}
-            readOnly={activePlanningReadOnly}
-            readOnlyReason={activePlanningSessionSubmitted ? 'submitted' : 'window'}
+            planningProgressLabel={activePlanningProgressLabel}
+            readOnly={planningWindowReadOnly}
+            readOnlyReason={planningWindowReadOnly ? 'window' : 'submitted'}
+            repositoryLocked={activePlanningSessionSubmitted}
             expanded={planningTerminalExpanded}
             mode={activePlanningMode}
             terminalSession={activePlanningTerminalSession}
             terminalBusy={activePlanningTerminalBusy}
             terminalError={activePlanningTerminalError}
             workflowRunning={activePlanningWorkflowRunning}
+            submittedWorkBuilt={activePlanningWorkflowBuilt}
             submittedPlanName={activePlanningSession.submittedPlanName}
             repoValue={activePlanningSession.repoInput ?? activePlanningSession.repoUrl ?? ''}
-            repoLocked={activePlanningRepoLocked}
+            baseBranchValue={planningRepoEditing
+              ? (activePlanningSession.baseBranchInput ?? activePlanningSession.baseBranch ?? '')
+              : (activePlanningSession.baseBranchInput || activePlanningSession.baseBranch || '')}
+            repoBound={Boolean(activePlanningSession.repoUrl)}
+            repoEditing={planningRepoEditing}
             repoSuggestions={planningRepoSuggestions}
             repoError={activePlanningSession.repoError ?? null}
+            repoNotice={activePlanningSession.repoNotice ?? null}
             turnError={
               activePlanningSession.activeTurnStatus === 'failed'
               && activePlanningSession.activeTurnError !== PLANNING_TURN_CANCELLED_MESSAGE
@@ -4871,7 +5148,9 @@ export function App() {
             onPresetChange={handlePlanningPresetChange}
             onConfirmationModeChange={handlePlanningConfirmationModeChange}
             onRepoInputChange={handlePlanningRepoInputChange}
+            onBaseBranchInputChange={handlePlanningBaseBranchInputChange}
             onRepoCommit={() => void commitPlanningRepo()}
+            onRepoEdit={startPlanningRepoEdit}
             onModeChange={(mode) => void handlePlanningModeChange(mode)}
             onExpand={() => setPlanningTerminalExpanded(true)}
             onCloseExpanded={() => setPlanningTerminalExpanded(false)}
@@ -5035,9 +5314,7 @@ export function App() {
         downstreamName={
           attachPickerWorkflowId ? (workflows.get(attachPickerWorkflowId)?.name ?? attachPickerWorkflowId) : ''
         }
-        entries={Array.from(workflows.values())
-          .filter((candidate) => candidate.id !== attachPickerWorkflowId)
-          .map((candidate) => ({ id: candidate.id, name: candidate.name }))}
+        entries={attachPickerEntries(workflows.values(), attachPickerWorkflowId)}
         onSelect={(upstreamWorkflowId) => void handleAttachWorkflowSelect(upstreamWorkflowId)}
         onClose={() => setAttachPickerWorkflowId(null)}
       />
@@ -5390,7 +5667,9 @@ export function App() {
           onReject={handleReject}
           onClose={closeModal}
           initialAction={modal.action}
+          decisionError={modal.decisionError}
           onFinish={modal.task.config.workflowId ? workflows.get(modal.task.config.workflowId)?.onFinish : undefined}
+          mergeMode={modal.task.config.workflowId ? workflows.get(modal.task.config.workflowId)?.mergeMode : undefined}
         />
       )}
 

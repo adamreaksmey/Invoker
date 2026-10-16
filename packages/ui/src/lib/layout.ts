@@ -12,6 +12,7 @@
  */
 
 import type { TaskState } from '../types.js';
+import { TASK_GRAPH_NODE_HEIGHT, TASK_GRAPH_NODE_WIDTH } from './task-graph-metrics.js';
 
 // elkjs (~1.6 MB bundled) is loaded lazily so it does not ride in the cold
 // startup entry chunk. The first workflow graph paint uses WorkflowGraph, which
@@ -56,8 +57,8 @@ interface ElkLayoutEngine {
   }>;
 }
 
-const NODE_WIDTH = 167;
-const NODE_HEIGHT = 40;
+const NODE_WIDTH = TASK_GRAPH_NODE_WIDTH;
+const NODE_HEIGHT = TASK_GRAPH_NODE_HEIGHT;
 const HORIZONTAL_GAP = 80;
 const VERTICAL_GAP_BASE = 24;
 const VERTICAL_GAP_PER_CONNECTION = 12;

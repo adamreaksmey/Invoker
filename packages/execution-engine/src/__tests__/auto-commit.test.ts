@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'no
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync, execSync } from 'node:child_process';
-import { BaseExecutor, type BaseEntry, MergeConflictError, type SetupBranchOptions } from '../base-executor.js';
+import { BaseExecutor, UNCHANGED_AI_TASK_ERROR, type BaseEntry, MergeConflictError, type SetupBranchOptions } from '../base-executor.js';
 import type { WorkRequest, WorkRequestInputs, WorkResponse } from '@invoker/contracts';
 import type { ExecutorHandle, TerminalSpec } from '../executor.js';
 
@@ -2351,8 +2351,29 @@ describe('BaseExecutor.handleProcessExit push semantics', () => {
     expect(msg).toContain('Exit code: 86');
   });
 
+  it('fails an ai task that exits 0 without changing files', async () => {
+    execSync('git checkout -b invoker/unchanged-ai', { cwd: cloneDir });
+    const before = execSync('git rev-parse HEAD', { cwd: cloneDir }).toString().trim();
+    const req = makeRequest('task-unchanged', {
+      description: 'Change the font',
+      prompt: 'Set the font to Times New Roman',
+    });
+    const entry = executor.registerTestEntry('e-unchanged-ai', req);
+    let response: WorkResponse | undefined;
+    entry.completeListeners.add((next) => { response = next; });
+
+    await executor.testHandleProcessExit('e-unchanged-ai', req, cloneDir, 0, {
+      branch: 'invoker/unchanged-ai',
+    });
+
+    expect(response?.status).toBe('failed');
+    expect(response?.outputs.error).toBe(UNCHANGED_AI_TASK_ERROR);
+    expect(execSync('git rev-parse HEAD', { cwd: cloneDir }).toString().trim()).toBe(before);
+  });
+
   it('does not force semantic failure for non-codex agents', async () => {
     execSync('git checkout -b invoker/non-codex', { cwd: cloneDir });
+    writeFileSync(join(cloneDir, 'changed.txt'), 'changed');
 
     const req = makeRequest('task-non-codex', {
       description: 'non codex',
@@ -2382,6 +2403,15 @@ describe('BaseExecutor.buildCommandAndArgs', () => {
 
   beforeEach(() => {
     executor = new TestExecutor();
+  });
+
+  it('runs the handoff scrub check in the worktree when the script path is missing there', () => {
+    const req = makeRequest('act', { command: 'bash scripts/scrub-handoff-artifacts.sh' });
+    const result = executor.testBuildCommandAndArgs(req);
+    expect(result.cmd).toBe('/bin/bash');
+    expect(result.args[0]).toBe('-c');
+    expect(result.args[1]).toContain('scrub-handoff-artifacts-ok');
+    expect(result.args[1]).not.toContain('scripts/scrub-handoff-artifacts.sh');
   });
 
   it('returns shell command for actionType=command', () => {

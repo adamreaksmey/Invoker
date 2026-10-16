@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   collapsePlanningChatLines,
   extractPlanningChatCopyCommand,
+  formatPlanningChatTimestamp,
   groupPlanningChatLines,
   humanizePlanningChatErrorTitle,
   presentPlanningChatError,
@@ -63,5 +64,23 @@ describe('planning-chat-message-ui', () => {
       'system-error',
       'system-notice',
     ]);
+  });
+
+  it('keeps a message timestamp and formats the local clock', () => {
+    const createdAt = '2026-10-15T10:08:00.000Z';
+    const collapsed = collapsePlanningChatLines([
+      { id: 1, text: 'hello', role: 'user' as const, createdAt },
+    ]);
+    expect(collapsed[0]?.createdAt).toBe(createdAt);
+
+    const sent = new Date(2026, 9, 15, 17, 8, 0);
+    const now = new Date(2026, 9, 15, 18, 0, 0);
+    expect(formatPlanningChatTimestamp(sent.toISOString(), now)).toBe('5:08 PM');
+    expect(formatPlanningChatTimestamp(undefined, now)).toBeNull();
+    expect(formatPlanningChatTimestamp('not-a-time', now)).toBeNull();
+
+    const earlier = new Date(2026, 9, 14, 9, 5, 0);
+    const month = earlier.toLocaleString(undefined, { month: 'short' });
+    expect(formatPlanningChatTimestamp(earlier.toISOString(), now)).toBe(`${month} 14, 9:05 AM`);
   });
 });

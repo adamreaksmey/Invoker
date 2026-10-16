@@ -1,6 +1,6 @@
 import type { IpcMain } from 'electron';
 import type { TerminalSessionDescriptor } from '@invoker/contracts';
-import type { SQLiteAdapter, TerminalSessionRecord } from '@invoker/data-store';
+import { SQLITE_READ_ONLY_PROCESS_ERROR, type SQLiteAdapter, type TerminalSessionRecord } from '@invoker/data-store';
 import { MAX_OUTPUT_SNAPSHOT_CHARS } from './embedded-terminal-manager.js';
 import type { EmbeddedTerminalManager, TerminalSessionPersistenceRecord } from './embedded-terminal-manager.js';
 import {
@@ -126,6 +126,23 @@ export function resizeTaskTerminalSession(deps: {
   );
 }
 
+function isReadOnlyPersistenceError(error: unknown): boolean {
+  return error instanceof Error && error.message === SQLITE_READ_ONLY_PROCESS_ERROR;
+}
+
+function forgetPersistedTerminalSession(
+  persistence: Pick<SQLiteAdapter, 'deleteTerminalSession'> | undefined,
+  sessionId: string,
+): void {
+  if (!persistence) return;
+  try {
+    persistence.deleteTerminalSession(sessionId);
+  } catch (error) {
+    if (isReadOnlyPersistenceError(error)) return;
+    throw error;
+  }
+}
+
 export function closeTaskTerminalSession(deps: {
   embeddedTerminalManager: Pick<EmbeddedTerminalManager, 'get' | 'close'>;
   persistence?: Pick<SQLiteAdapter, 'deleteTerminalSession'>;
@@ -133,7 +150,7 @@ export function closeTaskTerminalSession(deps: {
   const rejected = rejectPlanningTaskTerminalSession(deps.embeddedTerminalManager, sessionId);
   if (rejected) return rejected;
   const result = deps.embeddedTerminalManager.close(sessionId);
-  deps.persistence?.deleteTerminalSession(sessionId);
+  forgetPersistedTerminalSession(deps.persistence, sessionId);
   return result.ok ? result : { ok: true };
 }
 

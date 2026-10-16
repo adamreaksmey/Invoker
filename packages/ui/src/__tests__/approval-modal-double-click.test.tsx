@@ -30,12 +30,9 @@ afterEach(() => {
 });
 
 /*
- * Bug 4 repro: modal primary-action handlers do not guard against
- * back-to-back clicks. `handleApprove` synchronously calls the parent
- * callback and then `onClose`, but the button is still mounted for the
- * millisecond between the two synchronous events, so a shaky click
- * dispatches the callback twice. In production this queues two IPC
- * approvals against the same task id.
+ * Bug 4 repro: modal primary-action handlers guard against back-to-back
+ * clicks. The first click marks the decision as submitting, so a second
+ * click on the still-mounted button does not queue another approval.
  */
 describe('Modal double-click guard (regression)', () => {
   it('ApprovalModal approve button fires onApprove once on rapid double-click', () => {

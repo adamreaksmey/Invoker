@@ -43,6 +43,10 @@ describe('planning terminal startup hydrate race repro', () => {
   }
 
   function submitPlanningText(text: string) {
+    const repoInput = screen.queryByTestId('invoker-terminal-repo') as HTMLInputElement | null;
+    if (repoInput && !repoInput.value) {
+      fireEvent.change(repoInput, { target: { value: 'https://example.com/planning-repo.git' } });
+    }
     fireEvent.change(screen.getByTestId('invoker-terminal-input'), { target: { value: text } });
     fireEvent.submit(screen.getByTestId('invoker-terminal-input').closest('form')!);
   }
@@ -152,6 +156,7 @@ describe('planning terminal startup hydrate race repro', () => {
     await waitFor(() => {
       expect(mock.api.planningChatSend).toHaveBeenCalledWith({
         turnId: expect.any(String),
+        sessionId: 'session-1',
         message: 'start a local plan before restore',
         presetKey: 'codex',
         confirmationMode: 'require',

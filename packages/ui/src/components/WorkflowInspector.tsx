@@ -3,6 +3,7 @@ import type { ReviewGateArtifact, ReviewGateQueryResponse, TaskState, WorkflowMe
 import { getEffectiveVisualStatus, getStatusColor } from '../lib/colors.js';
 import { workflowStatusVisual } from '../lib/workflow-status.js';
 import { subscribeVisibilityAwarePoll } from '../hooks/visibilityAwarePoll.js';
+import { githubMergeNotice, mergeGateLeavesMergeToGitHub } from '../lib/merge-gate.js';
 import { mutationFailureTitle } from '../lib/mutation-failure-display.js';
 import { WorkerDecisionsSection } from './WorkerDecisionsSection.js';
 import { FixFailureBanner } from './FixFailureBanner.js';
@@ -241,14 +242,35 @@ function artifactDetail(artifact: ReviewGateArtifact): string | null {
 }
 
 
-function ReviewGateStackSection({ reviewGate }: { reviewGate: ReviewGateQueryResponse }): JSX.Element {
+function unpublishedReviewReason(task: TaskState | null | undefined): string | undefined {
+  if (!task?.config.isMergeNode || task.execution.reviewUrl) return undefined;
+  const status = task.execution.reviewStatus?.trim();
+  return status || undefined;
+}
+
+function ReviewGateStackSection({
+  reviewGate,
+  emptyReason,
+}: {
+  reviewGate: ReviewGateQueryResponse;
+  emptyReason?: string;
+}): JSX.Element {
   const artifacts = reviewGate.artifacts;
   const hasConnectors = artifacts.length > 1;
   return (
     <section className="rounded border border-border bg-secondary/70 p-3">
       <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Pull Request Stack</div>
       {artifacts.length === 0 ? (
-        <div className="mt-2 text-xs text-muted-foreground">No pull requests yet</div>
+        emptyReason ? (
+          <div
+            data-testid="empty-review-publication-alert"
+            className="mt-2 rounded border border-amber-500/40 bg-amber-950/40 p-2 text-xs text-amber-100"
+          >
+            {emptyReason}
+          </div>
+        ) : (
+          <div className="mt-2 text-xs text-muted-foreground">No pull requests yet</div>
+        )
       ) : (
         <ol className="mt-2 space-y-2">
           {artifacts.map((artifact, index) => (
@@ -325,7 +347,8 @@ export function WorkflowInspector({
   const [branchValue, setBranchValue] = useState(workflow?.baseBranch ?? '');
   const [taskLogEvents, setTaskLogEvents] = useState<TaskAuditEvent[]>([]);
   const [taskLogError, setTaskLogError] = useState<string | null>(null);
-  const [showLogs, setShowLogs] = useState(true);
+  const [showLogs, setShowLogs] = useState(false);
+  const [promptExpanded, setPromptExpanded] = useState(false);
   const [logLevelFilter, setLogLevelFilter] = useState<TaskLogLevel>('info');
   const [dismissedFixFailureKeys, setDismissedFixFailureKeys] = useState<Set<string>>(() => new Set());
 
@@ -444,6 +467,7 @@ export function WorkflowInspector({
   const statusDot = taskColors?.dot ?? '';
   const isFixApproval = Boolean(task?.execution.pendingFixError);
   const isNoMergeGate = Boolean(task?.config.isMergeNode && workflow?.onFinish === 'none');
+  const leavesMergeOnGitHub = Boolean(task && mergeGateLeavesMergeToGitHub(task, workflow));
   const showApprovalActions = Boolean(
     task
     && (task.status === 'awaiting_approval' || task.status === 'review_ready')
@@ -637,7 +661,12 @@ export function WorkflowInspector({
               </div>
             </div>
           )}
-          {showApprovalActions && task && (
+          {showApprovalActions && task && leavesMergeOnGitHub && (
+            <p data-testid="github-merge-notice" className="mt-3 text-xs text-muted-foreground">
+              {githubMergeNotice(task.execution.reviewUrl)}
+            </p>
+          )}
+          {showApprovalActions && task && !leavesMergeOnGitHub && (
             <div className="mt-3 flex gap-2 border-t border-border pt-3">
               <button
                 type="button"
@@ -775,6 +804,9 @@ export function WorkflowInspector({
                 ))}
               </select>
             </label>
+            <p data-testid="execution-agent-help" className="mt-2 text-[11px] leading-4 text-muted-foreground">
+              The coding program that executes this task, such as Codex or Claude. This is separate from the model. On a finished or failed task, a different agent starts a new run from the beginning.
+            </p>
           </section>
         )}
         {(task?.config.prompt || task?.config.isMergeNode) && onEditModel && (
@@ -794,6 +826,9 @@ export function WorkflowInspector({
                 ))}
               </select>
             </label>
+            <p data-testid="execution-model-help" className="mt-2 text-[11px] leading-4 text-muted-foreground">
+              The model id sent to that program. Default lets the program choose its own model. On a finished or failed task, a different model starts a new run from the beginning.
+            </p>
           </section>
         )}
 
@@ -931,7 +966,12 @@ export function WorkflowInspector({
                 data-sidebar-nav-order="20"
                 tabIndex={0}
               >
-                <div data-testid="prompt-command-display" onClick={startEditingPromptOrCommand} onDoubleClick={startEditingPromptOrCommand}>
+                <div
+                  data-testid="prompt-command-display"
+                  onClick={startEditingPromptOrCommand}
+                  onDoubleClick={startEditingPromptOrCommand}
+                  className={!promptExpanded && ((task?.config.prompt?.length ?? task?.config.command?.length ?? 0) > 280) ? 'max-h-24 overflow-hidden' : undefined}
+                >
                   {hasPrompt ? (
                     <p className="whitespace-pre-wrap break-words text-foreground">{task?.config.prompt}</p>
                   ) : (
@@ -940,11 +980,28 @@ export function WorkflowInspector({
                 </div>
               </div>
             )}
+            {!isEditingPrompt && !isEditingCommand && ((task?.config.prompt?.length ?? task?.config.command?.length ?? 0) > 280) && (
+              <button
+                type="button"
+                data-testid="prompt-expand-toggle"
+                onClick={() => setPromptExpanded((expanded) => !expanded)}
+                className="mt-2 text-[11px] text-muted-foreground hover:text-foreground"
+              >
+                {promptExpanded ? 'Show less' : 'Show full prompt'}
+              </button>
+            )}
           </section>
         )}
 
         {reviewGate ? (
-          <ReviewGateStackSection reviewGate={reviewGate} />
+          <ReviewGateStackSection reviewGate={reviewGate} emptyReason={unpublishedReviewReason(task)} />
+        ) : unpublishedReviewReason(task) ? (
+          <section className="rounded border border-amber-500/40 bg-amber-950/40 p-3">
+            <div className="text-[11px] uppercase tracking-wide text-amber-200">Pull request</div>
+            <p data-testid="empty-review-publication-alert" className="mt-2 text-xs text-amber-100">
+              {unpublishedReviewReason(task)}
+            </p>
+          </section>
         ) : reviewUrl && (
           <section className="rounded border border-border bg-secondary/70 p-3">
             <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Pull Request</div>

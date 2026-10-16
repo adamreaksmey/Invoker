@@ -1010,6 +1010,7 @@ export function createGuiMutationTaskActions(context: GuiMutationTaskActionsCont
       case 'delete':
       case 'delete-workflow':
       case 'detach-workflow':
+      case 'attach-workflow':
         return { workflowId: arg0, priority: 'high' };
       case 'rebase-retry':
       case 'rebase-recreate':
