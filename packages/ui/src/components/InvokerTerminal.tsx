@@ -52,6 +52,7 @@ export type PlanningTerminalMode = 'chat' | 'tmux';
 export interface InvokerTerminalPlanningStream {
   text: string;
   status: 'streaming' | 'failed';
+  statusLabel?: string;
 }
 
 export interface PlanningPresetOptionView {
@@ -82,7 +83,12 @@ export function isPlanningCancelledFailure(message: string | null | undefined): 
     || trimmed.endsWith(`\n${PLANNING_TURN_CANCELLED_MESSAGE}`);
 }
 
-function planningStreamStatusLabel(stream: InvokerTerminalPlanningStream | null | undefined): string {
+export function planningStreamStatusLabel(
+  stream: InvokerTerminalPlanningStream | null | undefined,
+  progressLabel?: string | null,
+): string {
+  const progress = progressLabel?.trim() || stream?.statusLabel?.trim();
+  if (progress) return progress;
   if (!stream) return 'Working…';
   if (stream.status !== 'failed') return 'Drafting your plan…';
   return isPlanningCancelledFailure(stream.text)
@@ -193,6 +199,7 @@ interface InvokerTerminalProps {
     taskGroups?: { workflow: string | null; tasks: string[] }[];
   };
   planningStream?: InvokerTerminalPlanningStream | null;
+  planningProgressLabel?: string | null;
   readOnly?: boolean;
   readOnlyReason?: 'submitted' | 'window';
   repositoryLocked?: boolean;
@@ -852,6 +859,7 @@ export function InvokerTerminal({
   draftReviewOpen = false,
   draftPlanSummary,
   planningStream,
+  planningProgressLabel = null,
   readOnly = false,
   readOnlyReason = 'submitted',
   repositoryLocked = false,
@@ -1149,12 +1157,12 @@ export function InvokerTerminal({
                 className="inline-block h-2.5 w-2.5 shrink-0 animate-spin rounded-full border border-muted-foreground border-t-foreground"
               />
             )}
-            <span>{planningStreamStatusLabel(planningStream)}</span>
+            <span>{planningStreamStatusLabel(planningStream, planningProgressLabel)}</span>
           </div>
         ) : null}
       </div>
     );
-  }, [busy, lines, onRetryTurn, planningStream, readOnly, turnError]);
+  }, [busy, lines, onRetryTurn, planningProgressLabel, planningStream, readOnly, turnError]);
   const showDraftReadyBar = draftPlanAvailable && !draftReviewOpen && !readOnly && !(submittedWorkBuilt && repositoryLocked);
   const showSubmittedPlanBar = Boolean(submittedPlanName && onOpenGraph) && !submittedWorkBuilt;
   return (

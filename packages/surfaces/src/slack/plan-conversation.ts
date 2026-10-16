@@ -81,7 +81,11 @@ export type PlanningCommandBuilder = (opts: {
   model?: string;
   prompt: string;
 }) => { command: string; args: string[] };
-export type RawPlannerOutputHandler = (chunk: string) => void;
+export type PlannerStreamUpdate =
+  | string
+  | { statusLabel: string };
+
+export type RawPlannerOutputHandler = (payload: PlannerStreamUpdate) => void;
 
 export function defaultPlanningCommand(
   cursorCommand: string,
@@ -812,7 +816,7 @@ export class PlanConversation {
     const tSave = Date.now();
 
     this.log('plan-conversation', 'info', `[PERF] sendMessage: init=${tInit - t0}ms, buildPrompt=${tPrompt - tInit}ms, cursor=${tCursor - tPrompt}ms, saveState=${tSave - tCursor}ms, total=${tSave - t0}ms`);
-    return nextDraft ? redactEmbeddedPlanFence(message) : message;
+    return nextDraft ? formatUserFacingPlanningDraftReply(message) : message;
   }
 
   private resolvePlanDoctorRepairLimit(isFirstDraft: boolean): number {
@@ -844,6 +848,7 @@ export class PlanConversation {
 
     while (true) {
       candidateNumber += 1;
+      this.emitPlannerStreamUpdate({ statusLabel: `Checking draft (${candidateNumber})…` });
       try {
         lastResult = await this.draftDoctor!(planText);
       } catch (error) {
@@ -869,6 +874,7 @@ export class PlanConversation {
       if (lastResult.infrastructureError || repairsAttempted >= repairLimit || timedOut) break;
 
       repairsAttempted += 1;
+      this.emitPlannerStreamUpdate({ statusLabel: `Repairing draft (${repairsAttempted})…` });
       const repairPrompt = this.formatPlannerTurn(
         this.buildDoctorRepairPrompt(planText, lastResult.diagnostics, candidateNumber),
       );
@@ -1273,6 +1279,7 @@ export class PlanConversation {
     plannerLabel: string,
   ): Promise<string> {
     await this.runAuthPreflightOrThrow(command, plannerLabel);
+    this.emitPlannerStreamUpdate({ statusLabel: this.formatAskingPlannerLabel(plannerLabel) });
 
     const totalAttempts = this.plannerRetryLimit + 1;
     let lastStderrTail = '';
@@ -1327,6 +1334,21 @@ export class PlanConversation {
       this.activePlannerReject = null;
       this.activePlannerAbortRequested = false;
     }
+  }
+
+  private emitPlannerStreamUpdate(payload: PlannerStreamUpdate): void {
+    if (!this.onRawPlannerOutput) return;
+    try {
+      this.onRawPlannerOutput(payload);
+    } catch (err) {
+      this.log('plan-conversation', 'error', `Raw planner output handler failed: ${err}`);
+    }
+  }
+
+  private formatAskingPlannerLabel(plannerLabel: string): string {
+    const trimmed = plannerLabel.trim();
+    if (!trimmed) return 'Asking planner…';
+    return `Asking ${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}…`;
   }
 
   private spawnPlannerAttempt(
@@ -1390,17 +1412,16 @@ export class PlanConversation {
 
       this.log('plan-conversation', 'info', `[PERF] cursor_spawn: pid=${child.pid ?? 'none'}, tool=${plannerLabel}, model=${this.model ?? 'default'}, cmd="${command} ${args.slice(0, -1).join(' ')} <prompt>", promptLen=${prompt.length}, cwd=${this.workingDir ?? process.cwd()}, attempt=${attemptNumber}/${totalAttempts}`);
 
+      let draftingProgressSent = false;
       child.stdout?.on('data', (chunk: Buffer) => {
         const chunkStr = chunk.toString();
         stdout += chunkStr;
         stdoutChunks++;
-        if (this.onRawPlannerOutput) {
-          try {
-            this.onRawPlannerOutput(chunkStr);
-          } catch (err) {
-            this.log('plan-conversation', 'error', `Raw planner output handler failed: ${err}`);
-          }
+        if (!draftingProgressSent) {
+          draftingProgressSent = true;
+          this.emitPlannerStreamUpdate({ statusLabel: 'Drafting plan…' });
         }
+        this.emitPlannerStreamUpdate(chunkStr);
         this.log('plan-conversation', 'info', `[PERF] cursor_stdout chunk #${stdoutChunks}: +${chunkStr.length} bytes (total=${stdout.length}, elapsed=${Date.now() - spawnStart}ms)`);
         armAuthLimboWatch(`${stdout}\n${stderr}`);
       });
@@ -1605,4 +1626,11 @@ export function redactEmbeddedPlanFence(text: string): string {
   const before = text.slice(0, fenceStart).trimEnd();
   const after = text.slice(fenceEnd).trimStart();
   return [before, PLAN_DRAFT_PLACEHOLDER, after].filter(Boolean).join('\n\n');
+}
+
+export function formatUserFacingPlanningDraftReply(message: string): string {
+  const redacted = redactEmbeddedPlanFence(message);
+  if (redacted.includes(PLAN_DRAFT_PLACEHOLDER)) return redacted;
+  if (!message.includes('```yaml')) return PLAN_DRAFT_PLACEHOLDER;
+  return redacted;
 }

@@ -126,6 +126,7 @@ const {
   PLANNING_TOOLS_EMPTY_PATH_MESSAGE,
   PLANNING_TURN_CANCELLED_MESSAGE,
   buildPlanningHarnessChoices,
+  planningStreamStatusLabel,
 } = await import('../components/InvokerTerminal.js');
 
 const COMPONENT_INPUT_HANDLER_BUDGET_MS = 16;
@@ -174,6 +175,15 @@ describe('Invoker terminal (component)', () => {
   afterEach(() => {
     mock.cleanup();
     xtermMock.reset();
+  });
+
+  it('prefers live progress labels over generic working copy', () => {
+    expect(planningStreamStatusLabel({
+      text: '',
+      status: 'streaming',
+      statusLabel: 'Checking draft (2)…',
+    })).toBe('Checking draft (2)…');
+    expect(planningStreamStatusLabel(null, 'Asking Cursor…')).toBe('Asking Cursor…');
   });
 
   async function openPlanningTerminal() {

@@ -18,7 +18,13 @@ import type { TaskRunnerCallbacks } from './task-runner-callbacks.js';
 import type { MergeGateProvider } from './merge-gate-provider.js';
 import type { ReviewProviderRegistry } from './review-provider-registry.js';
 import { normalizeBranchForGithubCli } from './github-branch-ref.js';
-import { isInvokerRepoUrl, reviewClaimSlices, type PrAuthoringContext, type PrAuthoringTaskEntry } from './pr-authoring.js';
+import {
+  formatMultipleReviewClaimsSinglePrError,
+  isInvokerRepoUrl,
+  reviewClaimSlices,
+  type PrAuthoringContext,
+  type PrAuthoringTaskEntry,
+} from './pr-authoring.js';
 import { isGitRefLockRace } from './git-utils.js';
 type ReviewGateState = NonNullable<TaskState['execution']['reviewGate']>;
 type ReviewGateArtifact = ReviewGateState['artifacts'][number];
@@ -550,9 +556,11 @@ export async function publishReviewArtifactsForMerge(host: MergeRunnerHost, args
     throw new Error('merge review publication requires a configured review provider');
   }
   if (reviewClaims.length > 1) {
-    throw new Error(
-      `workflow ${args.workflowId} carries ${reviewClaims.length} review claims, but it would publish as one PR; split the plan into a workflow chain with one claim per workflow: ${reviewClaims.map((claim) => `"${claim}"`).join('; ')}`,
-    );
+    throw new Error(formatMultipleReviewClaimsSinglePrError({
+      claimCount: reviewClaims.length,
+      claims: reviewClaims,
+      subject: `Workflow ${args.workflowId}`,
+    }));
   }
 
   logTaskProgress(host, args.mergeNodeTaskId, 'info', 'Authoring PR body', {

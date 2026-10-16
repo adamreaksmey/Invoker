@@ -65,6 +65,7 @@ export function planningSessionFromSummary(
 export type PlanningStreamState = {
   text: string;
   status: 'streaming' | 'failed';
+  statusLabel?: string;
 };
 
 export function makeInitialPlanningSession(
@@ -173,8 +174,30 @@ export function previewPlanningMessage(session: PlanningSessionView): string {
   return last?.text.replace(/\s+/g, ' ').trim() || 'No messages yet';
 }
 
-export function planningSessionStatusLabel(session: PlanningSessionView): string {
-  if (session.busy) return 'Working';
+export function resolvePlanningProgressLabel(
+  stream: PlanningStreamState | null | undefined,
+  storedProgressLabel?: string | null,
+): string | null {
+  const fromStream = stream?.statusLabel?.trim();
+  if (fromStream) return fromStream;
+  const stored = storedProgressLabel?.trim();
+  return stored || null;
+}
+
+export function initialPlanningProgressLabel(plannerLabel: string): string {
+  const trimmed = plannerLabel.trim();
+  if (!trimmed) return 'Asking planner…';
+  return `Asking ${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}…`;
+}
+
+export function planningSessionStatusLabel(
+  session: PlanningSessionView,
+  progressLabel?: string | null,
+): string {
+  if (session.busy) {
+    const trimmed = progressLabel?.trim();
+    return trimmed || 'Working';
+  }
   if (session.status === 'draft_ready') return 'Draft ready';
   if (session.status === 'waiting_for_answer') return 'Waiting for answer';
   if (session.status === 'submitted') return 'Submitted';

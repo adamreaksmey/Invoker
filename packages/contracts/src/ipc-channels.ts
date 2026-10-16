@@ -573,6 +573,7 @@ export type InAppPlanningTurnOutcome =
 export interface InAppPlanningStreamEvent {
   sessionId: string;
   chunk?: string;
+  statusLabel?: string;
   turnId?: string;
   turn?: InAppPlanningTurnOutcome;
 }

@@ -88,8 +88,10 @@ import {
   planningNeedsAttention,
   planningRepoStatusText,
   planningSessionFromSummary,
+  initialPlanningProgressLabel,
   planningSessionStatusLabel,
   planningSessionSummaryToView,
+  resolvePlanningProgressLabel,
   previewPlanningMessage,
   reconcileHydratedPlanningSessions,
   relativePlanningUpdatedAt,
@@ -620,6 +622,7 @@ export function App() {
   const planningPollFailureCountRef = useRef(0);
   const planningTurnGoneCountsRef = useRef<Map<string, number>>(new Map());
   const [planningStreamBySessionId, setPlanningStreamBySessionId] = useState<Record<string, PlanningStreamState>>({});
+  const [planningProgressLabelBySessionId, setPlanningProgressLabelBySessionId] = useState<Record<string, string>>({});
   const [planningPresetOptions, setPlanningPresetOptions] = useState<PlanningPresetOption[]>([]);
   const [planningPresetsLoading, setPlanningPresetsLoading] = useState(true);
   const [cursorDiscoverySummary, setCursorDiscoverySummary] = useState<CursorModelDiscoverySummary | undefined>();
@@ -635,6 +638,10 @@ export function App() {
     [activePlanningSessionId, planningSessions],
   );
   const activePlanningStream = planningStreamBySessionId[activePlanningSession.id] ?? null;
+  const activePlanningProgressLabel = resolvePlanningProgressLabel(
+    activePlanningStream,
+    planningProgressLabelBySessionId[activePlanningSession.id],
+  );
   const activePlanningConversationKey = activePlanningSession.conversationKey;
   const terminalLines = activePlanningSession.messages;
   const planningInput = activePlanningSession.input;
@@ -1133,7 +1140,7 @@ export function App() {
         applyTurnOutcomeRef.current(sessionId, event.turnId, event.turn);
         return;
       }
-      if (!sessionId || typeof event.chunk !== 'string' || !event.chunk) return;
+      if (!sessionId) return;
 
       const sessions = planningSessionsRef.current;
       const isStreamingTarget = (session: PlanningSessionView): boolean => (
@@ -1150,15 +1157,45 @@ export function App() {
         && isStreamingTarget(session)
       ));
       const localBusySession = sessions.find((session) => session.id.startsWith('local-') && isStreamingTarget(session));
-      const targetSessionId = matchingSession && isStreamingTarget(matchingSession)
+      let targetSessionId = matchingSession && isStreamingTarget(matchingSession)
         ? matchingSession.id
         : aliasedSession && isStreamingTarget(aliasedSession)
           ? aliasedSession.id
           : activeLocalSession?.id ?? localBusySession?.id;
+      if (!targetSessionId && typeof event.statusLabel === 'string' && event.statusLabel.trim()) {
+        if (matchingSession) targetSessionId = matchingSession.id;
+        else if (aliasedSession) targetSessionId = aliasedSession.id;
+        else if (sessions.some((session) => session.id === sessionId)) targetSessionId = sessionId;
+      }
       if (!targetSessionId) return;
       if (!matchingSession) {
         planningStreamSessionAliasesRef.current.set(sessionId, targetSessionId);
       }
+
+      const statusLabel = typeof event.statusLabel === 'string' ? event.statusLabel.trim() : '';
+      if (statusLabel) {
+        setPlanningProgressLabelBySessionId((prev) => {
+          const next = { ...prev };
+          for (const id of [targetSessionId, sessionId]) {
+            if (id) next[id] = statusLabel;
+          }
+          return next;
+        });
+        setPlanningStreamBySessionId((prev) => {
+          const current = prev[targetSessionId];
+          return {
+            ...prev,
+            [targetSessionId]: {
+              text: current?.text ?? '',
+              status: current?.status ?? 'streaming',
+              statusLabel,
+            },
+          };
+        });
+        return;
+      }
+
+      if (typeof event.chunk !== 'string' || !event.chunk) return;
 
       setPlanningStreamBySessionId((prev) => {
         const current = prev[targetSessionId];
@@ -1167,6 +1204,7 @@ export function App() {
           [targetSessionId]: {
             text: `${current?.text ?? ''}${event.chunk}`,
             status: 'streaming',
+            statusLabel: current?.statusLabel,
           },
         };
       });
@@ -2493,6 +2531,68 @@ export function App() {
     });
   }, []);
 
+  const clearPlanningProgressLabelForSessionIds = useCallback((sessionIds: Array<string | null | undefined>) => {
+    const ids = new Set(sessionIds.filter((sessionId): sessionId is string => Boolean(sessionId)));
+    if (ids.size === 0) return;
+    setPlanningProgressLabelBySessionId((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const id of ids) {
+        if (id in next) {
+          delete next[id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, []);
+
+  const migratePlanningStreamStateForSessionId = useCallback((previousSessionId: string, nextSessionId: string) => {
+    if (!previousSessionId || !nextSessionId || previousSessionId === nextSessionId) return;
+    setPlanningStreamBySessionId((prev) => {
+      if (!(previousSessionId in prev) || nextSessionId in prev) return prev;
+      const next = { ...prev, [nextSessionId]: prev[previousSessionId] };
+      delete next[previousSessionId];
+      return next;
+    });
+    setPlanningProgressLabelBySessionId((prev) => {
+      if (!(previousSessionId in prev)) return prev;
+      const next = { ...prev, [nextSessionId]: prev[nextSessionId] ?? prev[previousSessionId] };
+      delete next[previousSessionId];
+      return next;
+    });
+  }, []);
+
+  const rememberPlanningProgressLabel = useCallback((sessionIds: Array<string | null | undefined>, label: string) => {
+    const trimmed = label.trim();
+    if (!trimmed) return;
+    const ids = new Set(sessionIds.filter((sessionId): sessionId is string => Boolean(sessionId)));
+    if (ids.size === 0) return;
+    setPlanningProgressLabelBySessionId((prev) => {
+      const next = { ...prev };
+      for (const id of ids) next[id] = trimmed;
+      return next;
+    });
+  }, []);
+
+  const seedPlanningStreamProgress = useCallback((
+    sessionIds: Array<string | null | undefined>,
+    label: string,
+  ) => {
+    const trimmed = label.trim();
+    if (!trimmed) return;
+    const ids = new Set(sessionIds.filter((sessionId): sessionId is string => Boolean(sessionId)));
+    if (ids.size === 0) return;
+    rememberPlanningProgressLabel([...ids], trimmed);
+    setPlanningStreamBySessionId((prev) => {
+      const next = { ...prev };
+      for (const id of ids) {
+        next[id] = { text: next[id]?.text ?? '', status: 'streaming', statusLabel: trimmed };
+      }
+      return next;
+    });
+  }, [rememberPlanningProgressLabel]);
+
   const forgetPlanningStreamAliasesForSessionIds = useCallback((sessionIds: Array<string | null | undefined>) => {
     const ids = new Set(sessionIds.filter((sessionId): sessionId is string => Boolean(sessionId)));
     if (ids.size === 0) return;
@@ -2585,6 +2685,7 @@ export function App() {
       planningSessionsRef.current = planningSessionsRef.current.map(applyCompleted);
       setPlanningSessions((prev) => prev.map(applyCompleted));
       clearPlanningStreamForSessionIds([sessionId, targetId]);
+      clearPlanningProgressLabelForSessionIds([sessionId, targetId]);
       forgetPlanningStreamAliasesForSessionIds([sessionId, targetId]);
       pendingPlanningStreamSessionIdsRef.current.delete(sessionId);
       pendingPlanningStreamSessionIdsRef.current.delete(targetId);
@@ -2619,10 +2720,16 @@ export function App() {
       }
       keepPlanningStreamFailureForSessionIds([sessionId, targetId], outcome.error);
     }
+    clearPlanningProgressLabelForSessionIds([sessionId, targetId]);
     forgetPlanningStreamAliasesForSessionIds([sessionId, targetId]);
     pendingPlanningStreamSessionIdsRef.current.delete(sessionId);
     pendingPlanningStreamSessionIdsRef.current.delete(targetId);
-  }, [appendTerminalLine, forgetPlanningStreamAliasesForSessionIds, keepPlanningStreamFailureForSessionIds]);
+  }, [
+    appendTerminalLine,
+    clearPlanningProgressLabelForSessionIds,
+    forgetPlanningStreamAliasesForSessionIds,
+    keepPlanningStreamFailureForSessionIds,
+  ]);
 
   useEffect(() => {
     applyTurnOutcomeRef.current = applyPlanningTurnOutcome;
@@ -2677,6 +2784,7 @@ export function App() {
       setActivePlanningSessionId((currentSessionId) => (
         currentSessionId === previousSessionId ? result.sessionId : currentSessionId
       ));
+      migratePlanningStreamStateForSessionId(previousSessionId, result.sessionId);
       applyPlanningTurnOutcome(result.sessionId, turnId, {
         status: 'completed',
         reply: result.reply,
@@ -2710,6 +2818,7 @@ export function App() {
         setActivePlanningSessionId((currentSessionId) => (
           currentSessionId === previousSessionId ? failedSessionId : currentSessionId
         ));
+        migratePlanningStreamStateForSessionId(previousSessionId, failedSessionId);
       }
       applyPlanningTurnOutcome(result.sessionId ?? previousSessionId, turnId, { status: 'failed', error: result.error });
       return;
@@ -2742,6 +2851,7 @@ export function App() {
     appendTerminalLine,
     forgetPlanningStreamAliasesForSessionIds,
     keepPlanningStreamFailureForSessionIds,
+    migratePlanningStreamStateForSessionId,
     updatePlanningSessionById,
   ]);
 
@@ -3237,7 +3347,12 @@ export function App() {
     const previousSessionId = activeViewId;
     pendingPlanningStreamSessionIdsRef.current.add(previousSessionId);
     clearPlanningStreamForSessionIds([previousSessionId, sendSessionId]);
+    clearPlanningProgressLabelForSessionIds([previousSessionId, sendSessionId]);
     forgetPlanningStreamAliasesForSessionIds([previousSessionId, sendSessionId]);
+    const activePreset = planningPresetOptions.find((option) => option.key === selectedPlanningPresetKey)
+      ?? planningPresetOptions[0];
+    const initialProgressLabel = initialPlanningProgressLabel(activePreset?.label ?? activePreset?.tool ?? 'Cursor');
+    seedPlanningStreamProgress([previousSessionId, sendSessionId], initialProgressLabel);
     markPlanningTurnRunning(previousSessionId, turnId);
     try {
       const result = await invoker.planningChatSend(request);
@@ -3254,6 +3369,7 @@ export function App() {
     planningWindowReadOnly,
     appendTerminalLine,
     commitPlanningRepo,
+    clearPlanningProgressLabelForSessionIds,
     clearPlanningStreamForSessionIds,
     forgetPlanningStreamAliasesForSessionIds,
     handlePlanningSendResult,
@@ -3262,7 +3378,10 @@ export function App() {
     hasLoadedPlan,
     invoker,
     markPlanningTurnRunning,
+    planningPresetOptions,
     refreshPlanningSessionsNow,
+    seedPlanningStreamProgress,
+    selectedPlanningPresetKey,
     activePlanningSession.draftPlanAvailable,
     activePlanningSession.messages.length,
     activePlanningSession.repoInput,
@@ -3286,6 +3405,15 @@ export function App() {
     if (!lastUserLine || !invoker?.planningChatSend) return;
     const turnId = session.activeTurnId;
     const previousSessionId = session.id;
+    pendingPlanningStreamSessionIdsRef.current.add(previousSessionId);
+    clearPlanningStreamForSessionIds([previousSessionId]);
+    clearPlanningProgressLabelForSessionIds([previousSessionId]);
+    const activePreset = planningPresetOptions.find((option) => option.key === selectedPlanningPresetKey)
+      ?? planningPresetOptions[0];
+    seedPlanningStreamProgress(
+      [previousSessionId],
+      initialPlanningProgressLabel(activePreset?.label ?? activePreset?.tool ?? 'Cursor'),
+    );
     markPlanningTurnRunning(previousSessionId, turnId);
     try {
       const result = await invoker.planningChatSend({
@@ -3304,10 +3432,14 @@ export function App() {
     }
   }, [
     activePlanningSession,
+    clearPlanningProgressLabelForSessionIds,
+    clearPlanningStreamForSessionIds,
     handlePlanningSendResult,
     invoker,
     markPlanningTurnRunning,
+    planningPresetOptions,
     refreshPlanningSessionsNow,
+    seedPlanningStreamProgress,
     selectedPlanningConfirmationMode,
     selectedPlanningPresetKey,
   ]);
@@ -4943,7 +5075,7 @@ export function App() {
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <span className="rounded-full border border-border bg-background px-2.5 py-1 text-[11px] text-muted-foreground">
-              {planningSessionStatusLabel(activePlanningSession)}
+              {planningSessionStatusLabel(activePlanningSession, activePlanningProgressLabel)}
             </span>
             {setupIncomplete && (
               <button
@@ -4982,6 +5114,7 @@ export function App() {
             draftReviewOpen={activeDraftReviewOpen}
             draftPlanSummary={draftPlanSummary}
             planningStream={activePlanningStream}
+            planningProgressLabel={activePlanningProgressLabel}
             readOnly={planningWindowReadOnly}
             readOnlyReason={planningWindowReadOnly ? 'window' : 'submitted'}
             repositoryLocked={activePlanningSessionSubmitted}

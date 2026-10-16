@@ -849,7 +849,13 @@ function planConversationConfig(
     plannerRetryBaseDelayMs: deps.config.plannerRetryBaseDelayMs,
     planDoctorScriptPath: deps.planDoctorScriptPath,
     onRawPlannerOutput: deps.onRawPlannerOutput
-      ? (chunk) => deps.onRawPlannerOutput?.({ sessionId: threadTs, chunk })
+      ? (payload) => {
+        if (typeof payload === 'string') {
+          deps.onRawPlannerOutput?.({ sessionId: threadTs, chunk: payload });
+          return;
+        }
+        deps.onRawPlannerOutput?.({ sessionId: threadTs, statusLabel: payload.statusLabel });
+      }
       : undefined,
     log: deps.logger
       ? (_source, level, message) => {
