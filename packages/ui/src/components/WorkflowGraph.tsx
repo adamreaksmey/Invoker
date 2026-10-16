@@ -400,7 +400,7 @@ function WorkflowGraphInner({
 
   const nodes = useMemo<Node<WorkflowNodeData>[]>(() => {
     const startedAt = performance.now();
-    const namesById = new Map(graph.nodes.map((node) => [node.id, node.name]));
+    const upstreamsById = new Map(graph.nodes.map((node) => [node.id, node.workflow]));
     const nextNodes = graph.nodes.map((node) => {
       const position = positions.get(node.id) ?? { x: 80, y: 80 };
       const dimmed = statusFilters.size > 0 && !statusFilters.has(node.workflow.status);
@@ -416,7 +416,7 @@ function WorkflowGraphInner({
           selected: selectedWorkflowIdRef.current === node.id,
           dimmed,
           coreActivity: coreActivityByWorkflow?.get(node.id),
-          upstreamLabel: upstreamWaitLabel(node.workflow.externalDependencies, namesById),
+          upstreamLabel: upstreamWaitLabel(node.workflow.externalDependencies, upstreamsById),
           onSelect: () => onSelectWorkflow(node.id),
         },
       };

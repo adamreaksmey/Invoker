@@ -51,11 +51,25 @@ describe('attach workflow request', () => {
   });
 
   it('names the upstream a plan waits on', () => {
-    const names = new Map([['wf-up', 'Set all app text to 15px']]);
-    expect(upstreamWaitLabel([{ workflowId: 'wf-up' }], names)).toBe('Waits on Set all app text to 15px');
-    expect(upstreamWaitLabel([{ workflowId: 'wf-up' }, { workflowId: 'wf-other' }], names)).toBe(
+    const upstreams = new Map([['wf-up', { name: 'Set all app text to 15px', status: 'running' as const }]]);
+    expect(upstreamWaitLabel([{ workflowId: 'wf-up' }], upstreams)).toBe('Waits on Set all app text to 15px');
+    expect(upstreamWaitLabel([{ workflowId: 'wf-up' }, { workflowId: 'wf-other' }], upstreams)).toBe(
       'Waits on 2 upstream workflows',
     );
-    expect(upstreamWaitLabel([], names)).toBeUndefined();
+    expect(upstreamWaitLabel([], upstreams)).toBeUndefined();
+  });
+
+  it('only counts upstreams that have not completed yet', () => {
+    const upstreams = new Map([
+      ['wf-done', { name: 'Done upstream', status: 'completed' as const }],
+      ['wf-closed', { name: 'Closed upstream', status: 'closed' as const }],
+      ['wf-running', { name: 'Running upstream', status: 'running' as const }],
+    ]);
+    expect(upstreamWaitLabel([{ workflowId: 'wf-done' }], upstreams)).toBeUndefined();
+    expect(upstreamWaitLabel([{ workflowId: 'wf-done' }, { workflowId: 'wf-running' }], upstreams)).toBe(
+      'Waits on Running upstream',
+    );
+    expect(upstreamWaitLabel([{ workflowId: 'wf-closed' }], upstreams)).toBe('Waits on Closed upstream');
+    expect(upstreamWaitLabel([{ workflowId: 'wf-missing' }], upstreams)).toBe('Waits on wf-missing');
   });
 });

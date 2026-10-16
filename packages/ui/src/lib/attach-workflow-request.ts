@@ -1,6 +1,7 @@
 import type { WorkflowMeta } from '../types.js';
 
-const FINISHED_WORKFLOW_STATUSES = new Set(['completed', 'closed']);
+const COMPLETED_WORKFLOW_STATUS = 'completed';
+const FINISHED_WORKFLOW_STATUSES = new Set([COMPLETED_WORKFLOW_STATUS, 'closed']);
 
 export interface PendingWorkflowAttach {
   workflowId: string;
@@ -57,15 +58,17 @@ export function workflowPickerMatches(value: string, search: string): boolean {
 
 export function upstreamWaitLabel(
   dependencies: readonly { workflowId: string }[] | undefined,
-  names: ReadonlyMap<string, string>,
+  upstreamsById: ReadonlyMap<string, Pick<WorkflowMeta, 'name' | 'status'>>,
 ): string | undefined {
-  const attached = dependencies ?? [];
-  if (attached.length === 0) return undefined;
-  if (attached.length === 1) {
-    const upstreamId = attached[0].workflowId;
-    return `Waits on ${names.get(upstreamId) ?? upstreamId}`;
+  const pendingUpstreamIds = (dependencies ?? [])
+    .map((dependency) => dependency.workflowId)
+    .filter((upstreamId) => upstreamsById.get(upstreamId)?.status !== COMPLETED_WORKFLOW_STATUS);
+  if (pendingUpstreamIds.length === 0) return undefined;
+  if (pendingUpstreamIds.length === 1) {
+    const upstreamId = pendingUpstreamIds[0];
+    return `Waits on ${upstreamsById.get(upstreamId)?.name ?? upstreamId}`;
   }
-  return `Waits on ${attached.length} upstream workflows`;
+  return `Waits on ${pendingUpstreamIds.length} upstream workflows`;
 }
 
 function linkedUpstreamIds(
