@@ -2358,6 +2358,7 @@ export function App() {
     const confirmed = window.confirm(
       `Attach "${downstreamName}" to upstream "${upstreamName}"?\n\n` +
       `This adds a dependency so "${downstreamName}" waits on "${upstreamName}"'s merge. ` +
+      `Nothing runs automatically until you use Start ready work. ` +
       `Tasks that already ran ahead of this gate are left untouched.`,
     );
     if (!confirmed) return;
