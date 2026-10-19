@@ -8,6 +8,7 @@ interface WorkflowNodeProps {
   selected: boolean;
   dimmed: boolean;
   coreActivity?: WorkflowCoreActivity;
+  upstreamLabel?: string;
   onClick: () => void;
   onContextMenu: (event: MouseEvent<HTMLDivElement>) => void;
 }
@@ -25,6 +26,7 @@ export function WorkflowNode({
   selected,
   dimmed,
   coreActivity,
+  upstreamLabel,
   onClick,
   onContextMenu,
 }: WorkflowNodeProps): JSX.Element {
@@ -76,6 +78,14 @@ export function WorkflowNode({
       </div>
       <div className="mt-1 text-base text-muted-foreground truncate">{workflow.id}</div>
       <div className={`mt-2 text-[15px] uppercase tracking-wide ${visual.textClass}`}>{statusLabel(workflow.status)}</div>
+      {upstreamLabel && (
+        <div
+          data-testid={`workflow-node-${workflow.id}-upstream`}
+          className="mt-1 truncate text-[15px] text-sky-300"
+        >
+          {upstreamLabel}
+        </div>
+      )}
       {showRunningTaskLine && (
         <div
           data-testid={`workflow-node-${workflow.id}-running-tasks`}

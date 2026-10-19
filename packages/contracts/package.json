@@ -19,6 +19,11 @@
       "types": "./src/planning-surface.ts",
       "import": "./src/planning-surface.ts",
       "require": "./src/planning-surface.ts"
+    },
+    "./planning-clone-status": {
+      "types": "./src/planning-clone-status.ts",
+      "import": "./src/planning-clone-status.ts",
+      "require": "./src/planning-clone-status.ts"
     }
   },
   "scripts": {

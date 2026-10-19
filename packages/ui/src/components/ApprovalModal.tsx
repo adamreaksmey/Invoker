@@ -7,6 +7,8 @@
 
 import { useState, useEffect } from 'react';
 import type { TaskState, ClaudeMessage, AgentSessionData } from '../types.js';
+import { githubMergeNotice, mergeGateLeavesMergeToGitHub } from '../lib/merge-gate.js';
+import { MarkdownText } from './MarkdownText.js';
 import {
   Button,
   Dialog,
@@ -16,6 +18,9 @@ import {
   DialogTitle,
 } from './primitives/index.js';
 
+const SUBMITTING_DECISION_LABEL = 'Working...';
+const GITHUB_PULL_REQUEST_HEADING = 'Pull request is on GitHub';
+
 interface ApprovalModalProps {
   task: TaskState;
   onApprove: (taskId: string) => void;
@@ -23,6 +28,8 @@ interface ApprovalModalProps {
   onClose: () => void;
   initialAction?: 'approve' | 'reject';
   onFinish?: string;
+  mergeMode?: string;
+  decisionError?: string;
 }
 
 export function ApprovalModal({
@@ -32,6 +39,8 @@ export function ApprovalModal({
   onClose,
   initialAction = 'approve',
   onFinish,
+  mergeMode,
+  decisionError,
 }: ApprovalModalProps) {
   const extractSessionFromEvents = (
     events: Array<{ eventType?: string; payload?: string }>,
@@ -67,6 +76,7 @@ export function ApprovalModal({
 
   const isFixApproval = Boolean(task.execution.pendingFixError);
   const isMergeNode = Boolean(task.config.isMergeNode);
+  const leavesMergeOnGitHub = mergeGateLeavesMergeToGitHub(task, { onFinish, mergeMode });
   const fallbackSessionId = extractSessionIdFromError(task.execution.pendingFixError);
   const [eventSessionId, setEventSessionId] = useState<string | undefined>(undefined);
   const [eventAgentName, setEventAgentName] = useState<string | undefined>(undefined);
@@ -156,11 +166,15 @@ export function ApprovalModal({
       });
   }, [sessionId, effectiveAgentName]);
 
+  useEffect(() => {
+    if (!decisionError) return;
+    setSubmitting(false);
+  }, [decisionError]);
+
   const handleApprove = () => {
     if (submitting) return;
     setSubmitting(true);
     onApprove(task.id);
-    onClose();
   };
 
   const handleReject = () => {
@@ -171,28 +185,15 @@ export function ApprovalModal({
     if (submitting) return;
     setSubmitting(true);
     onReject(task.id, reason || undefined);
-    onClose();
   };
 
-  const heading = isFixApproval
-    ? 'Approve AI Fix'
-    : isMergeNode
-      ? onFinish === 'merge'
-        ? 'Confirm Merge'
-        : onFinish === 'pull_request'
-          ? 'Confirm Create PR'
-          : 'Approve Merge'
-      : 'Manual Approval Required';
-
-  const approveButtonLabel = isFixApproval
-    ? 'Approve Fix'
-    : isMergeNode
-      ? onFinish === 'merge'
-        ? 'Confirm Merge'
-        : onFinish === 'pull_request'
-          ? 'Confirm Create PR'
-          : 'Approve Merge'
-      : 'Approve';
+  const heading = approvalHeading({
+    isFixApproval,
+    isMergeNode,
+    onFinish,
+    leavesMergeOnGitHub,
+  });
+  const approveButtonLabel = approvalButtonLabel({ isFixApproval, isMergeNode, onFinish });
 
   const mergeRejectLabel = onFinish === 'pull_request' ? 'Reject PR' : 'Reject Merge';
   const mergeConfirmRejectLabel =
@@ -248,10 +249,22 @@ export function ApprovalModal({
           {task.config.summary && (
             <div className="bg-muted/50 rounded p-3">
               <h3 className="text-sm font-medium text-muted-foreground mb-1">Summary</h3>
-              <p className="text-xs text-muted-foreground whitespace-pre-wrap max-h-[20vh] overflow-y-auto">
-                {task.config.summary}
-              </p>
+              <div className="text-xs text-muted-foreground max-h-[20vh] overflow-y-auto" data-testid="approval-summary">
+                <MarkdownText text={task.config.summary} />
+              </div>
             </div>
+          )}
+
+          {leavesMergeOnGitHub && (
+            <p className="text-sm text-muted-foreground" data-testid="github-merge-notice">
+              {githubMergeNotice(task.execution.reviewUrl)}
+            </p>
+          )}
+
+          {decisionError && !submitting && (
+            <p className="text-sm text-red-400" role="alert" data-testid="approval-decision-error">
+              {decisionError}
+            </p>
           )}
 
           {showRejectInput && (
@@ -278,26 +291,52 @@ export function ApprovalModal({
           <Button type="button" variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            disabled={submitting}
-            onClick={handleReject}
-          >
-            {rejectButtonLabel}
-          </Button>
-          {!showRejectInput && (
+          {!leavesMergeOnGitHub && (
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={submitting}
+              onClick={handleReject}
+            >
+              {submitting && showRejectInput ? SUBMITTING_DECISION_LABEL : rejectButtonLabel}
+            </Button>
+          )}
+          {!showRejectInput && !leavesMergeOnGitHub && (
             <Button
               type="button"
               disabled={submitting}
               className="bg-green-600 text-white hover:bg-green-500"
               onClick={handleApprove}
             >
-              {approveButtonLabel}
+              {submitting && !showRejectInput ? SUBMITTING_DECISION_LABEL : approveButtonLabel}
             </Button>
           )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
+}
+
+function approvalHeading(input: {
+  isFixApproval: boolean;
+  isMergeNode: boolean;
+  onFinish?: string;
+  leavesMergeOnGitHub: boolean;
+}): string {
+  if (input.isFixApproval) return 'Approve AI Fix';
+  if (input.leavesMergeOnGitHub) return GITHUB_PULL_REQUEST_HEADING;
+  if (!input.isMergeNode) return 'Manual Approval Required';
+  if (input.onFinish === 'merge') return 'Confirm Merge';
+  return 'Approve Merge';
+}
+
+function approvalButtonLabel(input: {
+  isFixApproval: boolean;
+  isMergeNode: boolean;
+  onFinish?: string;
+}): string {
+  if (input.isFixApproval) return 'Approve Fix';
+  if (!input.isMergeNode) return 'Approve';
+  if (input.onFinish === 'merge') return 'Confirm Merge';
+  return 'Approve Merge';
 }

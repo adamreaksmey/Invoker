@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { reconcileHydratedPlanningSessions, type PlanningSessionView } from '../lib/planning-session-view.js';
+import {
+  planningSessionStatusLabel,
+  reconcileHydratedPlanningSessions,
+  resolvePlanningProgressLabel,
+  type PlanningSessionView,
+} from '../lib/planning-session-view.js';
 
 function makeSession(overrides: Partial<PlanningSessionView> = {}): PlanningSessionView {
   return {
@@ -22,6 +27,22 @@ function makeSession(overrides: Partial<PlanningSessionView> = {}): PlanningSess
     ...overrides,
   } as PlanningSessionView;
 }
+
+describe('planningSessionStatusLabel', () => {
+  it('shows live progress labels while a turn is busy', () => {
+    expect(planningSessionStatusLabel(makeSession({ busy: true }), 'Checking draft (2)…'))
+      .toBe('Checking draft (2)…');
+    expect(planningSessionStatusLabel(makeSession({ busy: true }), '   ')).toBe('Working');
+  });
+});
+
+describe('resolvePlanningProgressLabel', () => {
+  it('falls back to stored progress when the stream row was cleared', () => {
+    expect(resolvePlanningProgressLabel(null, 'Checking draft (1)…')).toBe('Checking draft (1)…');
+    expect(resolvePlanningProgressLabel({ text: '', status: 'streaming' }, 'Repairing draft (2)…'))
+      .toBe('Repairing draft (2)…');
+  });
+});
 
 describe('reconcileHydratedPlanningSessions busy derivation', () => {
   it('marks a session busy when the restored turn is running, even if the local view was not busy', () => {

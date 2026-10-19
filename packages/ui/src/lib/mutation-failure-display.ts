@@ -3,7 +3,8 @@ import type { WorkflowMutationFailedEvent } from '@invoker/contracts';
 /**
  * Task-scoped and workflow-scoped mutation failures belong in the task panel /
  * workflow UI, not the top banner. The banner is only for failures with no
- * task or workflow context to open.
+ * task or workflow context to open. Approve and reject also toast. The
+ * confirmation dialog stays open and shows the same reason.
  */
 export function shouldShowMutationFailureBanner(
   event: WorkflowMutationFailedEvent,
@@ -11,6 +12,13 @@ export function shouldShowMutationFailureBanner(
   if (event.taskId) return false;
   if (event.workflowId) return false;
   return true;
+}
+
+export function isOperatorDecisionFailure(event: WorkflowMutationFailedEvent): boolean {
+  return event.channel === 'invoker:approve'
+    || event.channel === 'invoker:reject'
+    || event.headlessCommand === 'approve'
+    || event.headlessCommand === 'reject';
 }
 
 export function mutationFailureTitle(event: WorkflowMutationFailedEvent): string {

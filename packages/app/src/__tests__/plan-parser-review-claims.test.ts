@@ -65,7 +65,7 @@ describe('parsePlan review claim count', () => {
     }
     expect(error).toBeInstanceOf(PlanParseError);
     const message = (error as Error).message;
-    expect(message).toMatch(/carries 2 review claims/);
+    expect(message).toMatch(/has 2 different review claims but would open only one PR/);
     expect(message).toContain('"First claim about behavior"');
     expect(message).toContain('"Second claim about docs"');
   });

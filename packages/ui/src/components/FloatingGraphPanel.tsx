@@ -19,6 +19,36 @@ interface DragState {
 }
 
 const PANEL_MARGIN = 12;
+const COMPACT_PANEL_CLASS = 'h-[210px] w-[315px]';
+const EXPANDED_PANEL_CLASS = 'h-[420px] w-[640px]';
+const PANEL_SIZE_STORAGE_KEY = 'invoker.floating-task-dag-size';
+const PANEL_SIZE_EXPANDED = 'expanded';
+const LARGER_PANEL_LABEL = 'Larger';
+const SMALLER_PANEL_LABEL = 'Smaller';
+
+type PanelSize = 'compact' | 'expanded';
+
+function readStoredPanelSize(): PanelSize {
+  try {
+    return window.localStorage.getItem(PANEL_SIZE_STORAGE_KEY) === PANEL_SIZE_EXPANDED
+      ? 'expanded'
+      : 'compact';
+  } catch {
+    return 'compact';
+  }
+}
+
+function storePanelSize(size: PanelSize): void {
+  try {
+    window.localStorage.setItem(PANEL_SIZE_STORAGE_KEY, size);
+  } catch {
+    return;
+  }
+}
+
+function panelSizeClass(size: PanelSize): string {
+  return size === 'expanded' ? EXPANDED_PANEL_CLASS : COMPACT_PANEL_CLASS;
+}
 
 export function FloatingGraphPanel({
   title,
@@ -32,6 +62,7 @@ export function FloatingGraphPanel({
   const panelRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+  const [panelSize, setPanelSize] = useState<PanelSize>(readStoredPanelSize);
 
   const clampPosition = useCallback((left: number, top: number): { left: number; top: number } => {
     const bounds = boundsRef.current;
@@ -91,11 +122,21 @@ export function FloatingGraphPanel({
     event.stopPropagation();
   }, []);
 
+  const togglePanelSize = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    event.preventDefault();
+    setPanelSize((current) => {
+      const next = current === 'compact' ? 'expanded' : 'compact';
+      storePanelSize(next);
+      return next;
+    });
+  }, []);
+
   return (
     <div
       ref={panelRef}
       data-testid={testId}
-      className={`absolute top-3 right-3 z-10 h-[210px] w-[315px] rounded border border-border bg-background/95 overflow-hidden shadow-lg ${className}`}
+      className={`absolute top-3 right-3 z-10 flex flex-col rounded border border-border bg-background/95 overflow-hidden shadow-lg ${panelSizeClass(panelSize)} ${className}`}
       style={{
         ...(position ? { left: position.left, top: position.top, right: 'auto' } : {}),
         pointerEvents: 'auto',
@@ -105,15 +146,23 @@ export function FloatingGraphPanel({
     >
       <div
         data-testid={dragHandleTestId}
-        className="cursor-move select-none px-2 py-1 text-[11px] text-muted-foreground border-b border-border"
+        className="flex shrink-0 cursor-move select-none items-center gap-2 border-b border-border px-2 py-1 text-[11px] text-muted-foreground"
         onPointerDown={handleDragStart}
         onPointerMove={handleDragMove}
         onPointerUp={handleDragEnd}
         onPointerCancel={handleDragEnd}
       >
-        {title}
+        <span className="min-w-0 flex-1 truncate">{title}</span>
+        <button
+          type="button"
+          data-testid="floating-graph-panel-size"
+          className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[11px] text-foreground hover:bg-muted"
+          onPointerDown={togglePanelSize}
+        >
+          {panelSize === 'expanded' ? SMALLER_PANEL_LABEL : LARGER_PANEL_LABEL}
+        </button>
       </div>
-      <div className={contentClassName}>
+      <div className={`min-h-0 flex-1 ${contentClassName}`}>
         {children}
       </div>
     </div>

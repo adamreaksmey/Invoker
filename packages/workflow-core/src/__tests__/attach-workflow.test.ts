@@ -3,6 +3,7 @@ import { Orchestrator } from '../orchestrator.js';
 import {
   InMemoryPersistence,
   makeOrchestrator,
+  makeResponse,
   setupChain,
 } from './helpers/cross-workflow-cascade-helpers.js';
 
@@ -130,5 +131,60 @@ describe('Orchestrator.attachWorkflow', () => {
       orchestrator.getTask(bTaskId)!.status,
       'attach must not reset a task that already ran ahead',
     ).toBe('completed');
+  });
+
+  it('does not auto-start pending downstream tasks until startExecution is called', () => {
+    const persistence = new InMemoryPersistence();
+    const orchestrator = makeOrchestrator(persistence);
+    const upstreamId = loadLoneWorkflow(orchestrator, 'attach-no-autostart-up', 'memory://test-repo');
+    const upstreamTaskId = orchestrator.getAllTasks().find(
+      (t) => t.config.workflowId === upstreamId && !t.config.isMergeNode,
+    )!.id;
+    const upstreamMergeId = `__merge__${upstreamId}`;
+
+    orchestrator.startExecution();
+    orchestrator.handleWorkerResponse(makeResponse({ actionId: upstreamTaskId, status: 'completed' }));
+    orchestrator.handleWorkerResponse(makeResponse({ actionId: upstreamMergeId, status: 'completed' }));
+
+    const downstreamId = loadLoneWorkflow(orchestrator, 'attach-no-autostart-down', 'memory://test-repo');
+    const downstreamTaskId = orchestrator.getAllTasks().find(
+      (t) => t.config.workflowId === downstreamId && !t.config.isMergeNode,
+    )!.id;
+    expect(orchestrator.getTask(downstreamTaskId)!.status).toBe('pending');
+
+    orchestrator.attachWorkflow(downstreamId, upstreamId);
+
+    expect(orchestrator.getTask(downstreamTaskId)!.status).toBe('pending');
+    orchestrator.startExecution();
+    expect(orchestrator.getTask(downstreamTaskId)!.status).toBe('running');
+  });
+
+  it('preserves completed downstream tasks across detach and re-attach', () => {
+    const persistence = new InMemoryPersistence();
+    const orchestrator = makeOrchestrator(persistence);
+    const ctx = setupChain(orchestrator);
+
+    orchestrator.handleWorkerResponse(makeResponse({ actionId: ctx.downstreamLastId, status: 'completed' }));
+    orchestrator.handleWorkerResponse(makeResponse({ actionId: ctx.downstreamMergeId, status: 'completed' }));
+
+    persistence.updateTask(ctx.downstreamRootId, {
+      execution: { branch: 'feature/downstream-root', commit: 'abc111', reviewUrl: 'https://example.com/pr/1' },
+    });
+    orchestrator.syncAllFromDb();
+    const rootBefore = orchestrator.getTask(ctx.downstreamRootId)!;
+    expect(rootBefore.status).toBe('completed');
+    expect(rootBefore.execution.branch).toBe('feature/downstream-root');
+    expect(rootBefore.execution.commit).toBe('abc111');
+    expect(rootBefore.execution.reviewUrl).toBe('https://example.com/pr/1');
+
+    orchestrator.detachWorkflow(ctx.downstreamWfId, ctx.upstreamWfId);
+    orchestrator.attachWorkflow(ctx.downstreamWfId, ctx.upstreamWfId, { force: true });
+
+    const rootAfter = orchestrator.getTask(ctx.downstreamRootId)!;
+    expect(rootAfter.status).toBe('completed');
+    expect(rootAfter.execution.branch).toBe('feature/downstream-root');
+    expect(rootAfter.execution.commit).toBe('abc111');
+    expect(rootAfter.execution.reviewUrl).toBe('https://example.com/pr/1');
+    expect(orchestrator.getTask(ctx.downstreamLastId)!.status).toBe('completed');
   });
 });

@@ -135,6 +135,10 @@ describe('planning turn durability', () => {
     render(<App />);
     await openPlanningSurface();
 
+    const repoInput = screen.queryByTestId('invoker-terminal-repo') as HTMLInputElement | null;
+    if (repoInput && !repoInput.value) {
+      fireEvent.change(repoInput, { target: { value: 'https://example.com/planning-repo.git' } });
+    }
     fireEvent.change(screen.getByTestId('invoker-terminal-input'), { target: { value: 'hello planner' } });
     fireEvent.submit(screen.getByTestId('invoker-terminal-input').closest('form')!);
 
@@ -171,7 +175,11 @@ describe('planning turn durability', () => {
 
     vi.useFakeTimers();
     try {
-      fireEvent.change(screen.getByTestId('invoker-terminal-input'), { target: { value: 'hello planner' } });
+      const repoInput = screen.queryByTestId('invoker-terminal-repo') as HTMLInputElement | null;
+    if (repoInput && !repoInput.value) {
+      fireEvent.change(repoInput, { target: { value: 'https://example.com/planning-repo.git' } });
+    }
+    fireEvent.change(screen.getByTestId('invoker-terminal-input'), { target: { value: 'hello planner' } });
       fireEvent.submit(screen.getByTestId('invoker-terminal-input').closest('form')!);
       serverSessions.current = [
         makePlanningSessionSummary({
@@ -211,6 +219,10 @@ describe('planning turn durability', () => {
     render(<App />);
     await openPlanningSurface();
 
+    const repoInput = screen.queryByTestId('invoker-terminal-repo') as HTMLInputElement | null;
+    if (repoInput && !repoInput.value) {
+      fireEvent.change(repoInput, { target: { value: 'https://example.com/planning-repo.git' } });
+    }
     fireEvent.change(screen.getByTestId('invoker-terminal-input'), { target: { value: 'hello planner' } });
     fireEvent.submit(screen.getByTestId('invoker-terminal-input').closest('form')!);
 
@@ -244,7 +256,11 @@ describe('planning turn durability', () => {
 
     vi.useFakeTimers();
     try {
-      fireEvent.change(screen.getByTestId('invoker-terminal-input'), { target: { value: 'hello planner' } });
+      const repoInput = screen.queryByTestId('invoker-terminal-repo') as HTMLInputElement | null;
+    if (repoInput && !repoInput.value) {
+      fireEvent.change(repoInput, { target: { value: 'https://example.com/planning-repo.git' } });
+    }
+    fireEvent.change(screen.getByTestId('invoker-terminal-input'), { target: { value: 'hello planner' } });
       fireEvent.submit(screen.getByTestId('invoker-terminal-input').closest('form')!);
       serverSessions.current = [
         makePlanningSessionSummary({
@@ -344,6 +360,20 @@ describe('planning turn durability', () => {
   });
 
   it('does not fail the turn on a transient one-poll miss', async () => {
+    mock.api.planningChatCreate = vi.fn(async () => ({
+      ok: true as const,
+      session: {
+        id: 'server-1',
+        title: 'Server chat',
+        status: 'still_discussing' as const,
+        presetKey: 'codex',
+        confirmationMode: 'require' as const,
+        messages: [],
+        draftPlanAvailable: false,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    }));
     mock.api.planningChatSend = vi.fn((request: { turnId?: string }) => new Promise(() => {
       void request;
     })) as typeof mock.api.planningChatSend;
@@ -368,7 +398,11 @@ describe('planning turn durability', () => {
 
     vi.useFakeTimers();
     try {
-      fireEvent.change(screen.getByTestId('invoker-terminal-input'), { target: { value: 'hello planner' } });
+      const repoInput = screen.queryByTestId('invoker-terminal-repo') as HTMLInputElement | null;
+    if (repoInput && !repoInput.value) {
+      fireEvent.change(repoInput, { target: { value: 'https://example.com/planning-repo.git' } });
+    }
+    fireEvent.change(screen.getByTestId('invoker-terminal-input'), { target: { value: 'hello planner' } });
       fireEvent.submit(screen.getByTestId('invoker-terminal-input').closest('form')!);
       serverSessions.current = [runningServerSession];
       await act(async () => {
@@ -418,7 +452,11 @@ describe('planning turn durability', () => {
 
     vi.useFakeTimers();
     try {
-      fireEvent.change(screen.getByTestId('invoker-terminal-input'), { target: { value: 'hello planner' } });
+      const repoInput = screen.queryByTestId('invoker-terminal-repo') as HTMLInputElement | null;
+    if (repoInput && !repoInput.value) {
+      fireEvent.change(repoInput, { target: { value: 'https://example.com/planning-repo.git' } });
+    }
+    fireEvent.change(screen.getByTestId('invoker-terminal-input'), { target: { value: 'hello planner' } });
       fireEvent.submit(screen.getByTestId('invoker-terminal-input').closest('form')!);
       serverSessions.current = [
         makePlanningSessionSummary({
@@ -472,6 +510,10 @@ describe('planning turn durability', () => {
     render(<App />);
     await openPlanningSurface();
 
+    const repoInput = screen.queryByTestId('invoker-terminal-repo') as HTMLInputElement | null;
+    if (repoInput && !repoInput.value) {
+      fireEvent.change(repoInput, { target: { value: 'https://example.com/planning-repo.git' } });
+    }
     fireEvent.change(screen.getByTestId('invoker-terminal-input'), { target: { value: 'hello planner' } });
     fireEvent.submit(screen.getByTestId('invoker-terminal-input').closest('form')!);
 

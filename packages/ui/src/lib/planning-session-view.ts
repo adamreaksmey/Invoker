@@ -1,3 +1,4 @@
+import { planningRepoLabel } from '@invoker/contracts/planning-clone-status';
 import type {
   InAppPlanningSessionStatus,
   InAppPlanningSessionSummary,
@@ -16,7 +17,9 @@ export type PlanningSessionView = Omit<InAppPlanningSessionSummary, 'messages'> 
   terminalBusy?: boolean;
   terminalError?: string | null;
   repoInput?: string;
+  baseBranchInput?: string;
   repoError?: string | null;
+  repoNotice?: string | null;
 };
 
 export function planningSessionFromSummary(
@@ -46,6 +49,7 @@ export function planningSessionFromSummary(
       text: line.text,
       role: line.role,
       tone: line.tone,
+      createdAt: line.createdAt,
     })),
     input: '',
     busy: summary.activeTurnStatus === 'running',
@@ -61,6 +65,7 @@ export function planningSessionFromSummary(
 export type PlanningStreamState = {
   text: string;
   status: 'streaming' | 'failed';
+  statusLabel?: string;
 };
 
 export function makeInitialPlanningSession(
@@ -127,7 +132,9 @@ export function reconcileHydratedPlanningSessions(
       terminalBusy: restored.terminalSession ? false : session.terminalBusy,
       terminalError: restored.terminalSession ? null : session.terminalError,
       repoInput: session.repoInput,
+      baseBranchInput: session.baseBranchInput,
       repoError: session.repoError,
+      repoNotice: session.repoNotice,
     };
   });
   const newRestoredSessions = restoredSessions.filter((session) => !currentIds.has(session.id));
@@ -152,12 +159,6 @@ export function planningNeedsAttention(status: InAppPlanningSessionStatus): bool
   return status === 'waiting_for_answer' || status === 'draft_ready' || status === 'planner_error';
 }
 
-export function planningRepoLabel(repoUrl: string): string {
-  const trimmed = repoUrl.trim().replace(/\.git$/, '');
-  const segments = trimmed.split(/[/:]/).filter(Boolean);
-  return segments.length >= 2 ? segments.slice(-2).join('/') : (segments.at(-1) ?? trimmed);
-}
-
 export function planningRepoStatusText(repoUrl: string | undefined, baseCommit: string | undefined): string {
   if (!repoUrl) return 'No repository bound yet';
   const label = planningRepoLabel(repoUrl);
@@ -173,8 +174,30 @@ export function previewPlanningMessage(session: PlanningSessionView): string {
   return last?.text.replace(/\s+/g, ' ').trim() || 'No messages yet';
 }
 
-export function planningSessionStatusLabel(session: PlanningSessionView): string {
-  if (session.busy) return 'Working';
+export function resolvePlanningProgressLabel(
+  stream: PlanningStreamState | null | undefined,
+  storedProgressLabel?: string | null,
+): string | null {
+  const fromStream = stream?.statusLabel?.trim();
+  if (fromStream) return fromStream;
+  const stored = storedProgressLabel?.trim();
+  return stored || null;
+}
+
+export function initialPlanningProgressLabel(plannerLabel: string): string {
+  const trimmed = plannerLabel.trim();
+  if (!trimmed) return 'Asking planner…';
+  return `Asking ${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}…`;
+}
+
+export function planningSessionStatusLabel(
+  session: PlanningSessionView,
+  progressLabel?: string | null,
+): string {
+  if (session.busy) {
+    const trimmed = progressLabel?.trim();
+    return trimmed || 'Working';
+  }
   if (session.status === 'draft_ready') return 'Draft ready';
   if (session.status === 'waiting_for_answer') return 'Waiting for answer';
   if (session.status === 'submitted') return 'Submitted';

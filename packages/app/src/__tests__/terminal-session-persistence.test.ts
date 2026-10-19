@@ -23,7 +23,7 @@ import {
   type InAppPlanningChatSession,
   type InAppPlanningSessionStore,
 } from '../in-app-planner.js';
-import type { SQLiteAdapter, TerminalSessionRecord } from '@invoker/data-store';
+import { SQLITE_READ_ONLY_PROCESS_ERROR, type SQLiteAdapter, type TerminalSessionRecord } from '@invoker/data-store';
 import type { TaskState } from '@invoker/workflow-core';
 import {
   createTerminalUiPerfCounters,
@@ -389,6 +389,45 @@ describe('registerTerminalSessionPersistence coalesce', () => {
     expect(result).toEqual({ ok: true });
     expect(mgr.get(session.sessionId)).toBeUndefined();
   });
+
+  it('closes a live task session when the database is read-only in this process', () => {
+    const child = createFakeChild();
+    const mgr = new EmbeddedTerminalManager({
+      backend: createBashTerminalBackend({ spawnFn: (() => child) as unknown as BashSpawnFn }),
+    });
+    const session = mgr.openOrReuse({ taskId: 'task-live', spec: {}, cwd: '/tmp/task-live' });
+    const deleteTerminalSession = vi.fn(() => {
+      throw new Error(SQLITE_READ_ONLY_PROCESS_ERROR);
+    });
+
+    const result = closeTaskTerminalSession({
+      embeddedTerminalManager: mgr,
+      persistence: { deleteTerminalSession },
+    }, session.sessionId);
+
+    expect(result).toEqual({ ok: true });
+    expect(mgr.get(session.sessionId)).toBeUndefined();
+    expect(deleteTerminalSession).toHaveBeenCalledWith(session.sessionId);
+  });
+
+  it('surfaces a persistence delete failure that is not the read-only process guard', () => {
+    const child = createFakeChild();
+    const mgr = new EmbeddedTerminalManager({
+      backend: createBashTerminalBackend({ spawnFn: (() => child) as unknown as BashSpawnFn }),
+    });
+    const session = mgr.openOrReuse({ taskId: 'task-live', spec: {}, cwd: '/tmp/task-live' });
+
+    expect(() => closeTaskTerminalSession({
+      embeddedTerminalManager: mgr,
+      persistence: {
+        deleteTerminalSession: () => {
+          throw new Error('disk full');
+        },
+      },
+    }, session.sessionId)).toThrow('disk full');
+    expect(mgr.get(session.sessionId)).toBeUndefined();
+  });
+
   it('merges persisted task sessions with live task sessions and filters planning sessions', () => {
     const child = createFakeChild();
     const mgr = new EmbeddedTerminalManager({

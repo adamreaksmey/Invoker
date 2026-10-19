@@ -18,7 +18,8 @@ const __dirname = dirname(__filename);
 
 const { parse: parseYaml } = await importYaml(__dirname);
 
-const PLACEHOLDER_RE = /\bREPLACE_ME\b|\bTODO\b|\bTBD\b|\bFIXME\b/i;
+const CASE_FOLDED_PLACEHOLDER_RE = /\b(?:REPLACE_ME|TBD|FIXME)\b/i;
+const TODO_PLACEHOLDER_RE = /\bTODO\b/;
 const MANUAL_VERIFY_RE = /\bmanually\s+check\b|\bcheck\s+manually\b|\bby\s+hand\b/i;
 const GIT_URL_RE = /^(?:git@|https?:\/\/|ssh:\/\/).+\..+/i;
 const GREEN_BASELINE_RE = /\b(?:existing\s+)?(?:green\s+)?(?:baseline|suite|tests?|checks?)\b[^.\n]*(?:\bis\b|\bare\b|\bremains?\b)[^.\n]*\bgreen\b/i;
@@ -87,9 +88,13 @@ function headingValue(text, kind) {
   return match?.[1]?.trim() ?? '';
 }
 
+function containsPlaceholder(text) {
+  return CASE_FOLDED_PLACEHOLDER_RE.test(text) || TODO_PLACEHOLDER_RE.test(text);
+}
+
 function isPlaceholder(value) {
   if (!value || !value.trim()) return true;
-  if (PLACEHOLDER_RE.test(value)) return true;
+  if (containsPlaceholder(value)) return true;
   if (/^REPLACE_ME\b/i.test(value.trim())) return true;
   return false;
 }
@@ -235,7 +240,7 @@ function checkPlan(plan) {
   }
 
   const planText = JSON.stringify(plan);
-  if (PLACEHOLDER_RE.test(planText)) {
+  if (containsPlaceholder(planText)) {
     gaps.push({ field: 'REPLACE_ME', message: 'Plan still contains REPLACE_ME / TODO / TBD / FIXME placeholders.' });
   }
 

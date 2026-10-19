@@ -98,6 +98,8 @@ export function makePlanningSessionSummary(
     ],
     draftPlanAvailable: true,
     draftPlanSummary: { name: 'Saved plan', taskCount: 1, steps: ['Update README'] },
+    repoUrl: 'https://example.com/planning-repo.git',
+    baseBranch: 'main',
     createdAt: '2026-07-07T00:00:00.000Z',
     updatedAt: '2026-07-07T00:00:02.000Z',
     ...overrides,
@@ -239,7 +241,7 @@ export function createMockInvoker(
       return () => { planningChatStreamCallbacks.delete(cb); };
     }),
     planningChatSetTerminalMode: vi.fn(async () => ({ ok: true })),
-    planningChatRebindRepo: vi.fn(async () => ({ ok: true, action: 'provision' })),
+    planningChatRebindRepo: vi.fn(async () => ({ ok: true as const, action: 'provision' as const, baseBranch: 'main' })),
     planningTerminalOpen: vi.fn(async (planningSessionId: string) => ({
       opened: true,
       session: {
@@ -427,6 +429,7 @@ export function createMockInvoker(
     deleteWorkflow: vi.fn(async () => accepted('invoker:delete-workflow')),
     deleteTask: vi.fn(async () => accepted('invoker:delete-task')),
     detachWorkflow: vi.fn(async () => {}),
+    attachWorkflow: vi.fn(async () => accepted('invoker:attach-workflow')),
     cleanupWorktrees: vi.fn(async () => ({ removed: [], errors: [] })),
     recreateWorkflow: vi.fn(async () => accepted('invoker:recreate-workflow')),
     recreateTask: vi.fn(async () => accepted('invoker:recreate-task')),

@@ -1,5 +1,6 @@
 import { useEffect, useRef, type JSX } from 'react';
 import { GitBranch } from 'lucide-react';
+import { workflowPickerMatches } from '../lib/attach-workflow-request.js';
 import {
   Command,
   CommandEmpty,
@@ -8,6 +9,8 @@ import {
   CommandItem,
   CommandList,
 } from './primitives/index.js';
+
+const NO_ATTACH_CANDIDATES = 'No other workflow can be attached. Already-attached workflows stay hidden.';
 
 export interface AttachWorkflowPickerEntry {
   id: string;
@@ -28,7 +31,7 @@ export function AttachWorkflowPicker({
   entries,
   onSelect,
   onClose,
-}: AttachWorkflowPickerProps): JSX.Element {
+}: AttachWorkflowPickerProps): JSX.Element | null {
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -49,42 +52,50 @@ export function AttachWorkflowPicker({
     return () => document.removeEventListener('keydown', handleKeyDown, true);
   }, [open, onClose]);
 
+  if (!open) return null;
+
   return (
     <div
       role="dialog"
-      aria-modal={open}
+      aria-modal="true"
       aria-label={`Attach ${downstreamName} to...`}
-      aria-hidden={!open}
       data-testid="attach-workflow-picker"
-      data-state={open ? 'open' : 'closed'}
-      className={[
-        'fixed inset-0 z-50 flex items-start justify-center bg-black/70 px-4 pt-[18vh]',
-        open ? '' : 'hidden',
-      ].join(' ')}
+      data-state="open"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/70 px-4 pt-[18vh]"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >
       <div className="w-full max-w-xl overflow-hidden rounded-lg border border-border-strong bg-card text-card-foreground shadow-lg">
-        <Command loop shouldFilter>
+        <Command
+          loop
+          shouldFilter
+          filter={(value, search) => (workflowPickerMatches(value, search) ? 1 : 0)}
+        >
           <CommandInput
             ref={inputRef}
             placeholder={`Attach "${downstreamName}" to which upstream workflow?`}
           />
           <CommandList>
-            <CommandEmpty>No matching workflows.</CommandEmpty>
-            <CommandGroup heading="Workflows">
-              {entries.map((entry) => (
-                <CommandItem
-                  key={entry.id}
-                  value={`${entry.id} ${entry.name}`}
-                  onSelect={() => onSelect(entry.id)}
-                >
-                  <GitBranch strokeWidth={1.75} />
-                  <span className="truncate">{entry.name}</span>
-                </CommandItem>
-              ))}
-            </CommandGroup>
+            {entries.length === 0 ? (
+              <p className="px-3 py-6 text-center text-body text-muted-foreground">{NO_ATTACH_CANDIDATES}</p>
+            ) : (
+              <>
+                <CommandEmpty>No matching workflows.</CommandEmpty>
+                <CommandGroup heading="Workflows">
+                  {entries.map((entry) => (
+                    <CommandItem
+                      key={entry.id}
+                      value={`${entry.name} ${entry.id}`}
+                      onSelect={() => onSelect(entry.id)}
+                    >
+                      <GitBranch strokeWidth={1.75} />
+                      <span className="truncate">{entry.name}</span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </>
+            )}
           </CommandList>
         </Command>
       </div>

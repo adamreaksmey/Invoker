@@ -102,7 +102,7 @@ export function BundledEdge({
   };
 
   const label = data?.label;
-  const showLabel = strong && label;
+  const showLabel = hovered && Boolean(label);
 
   return (
     <g
@@ -130,30 +130,46 @@ export function BundledEdge({
       />
 
       {/* Hover label */}
-      {showLabel && (
-        <g transform={`translate(${labelX}, ${labelY})`}>
-          <rect
-            x={-label.length * 3.5 - 6}
-            y={-10}
-            width={label.length * 7 + 12}
-            height={20}
-            rx={4}
-            fill="rgb(var(--card))"
-            fillOpacity={0.9}
-            stroke={currentStroke}
-            strokeWidth={1}
-          />
-          <text
-            textAnchor="middle"
-            dominantBaseline="central"
-            fill="#e5e7eb"
-            fontSize={11}
-            fontFamily="ui-monospace, monospace"
-          >
-            {label}
-          </text>
-        </g>
+      {showLabel && label && (
+        <EdgeHoverLabel label={label} x={labelX} y={labelY} stroke={currentStroke} />
       )}
+    </g>
+  );
+}
+
+const EDGE_LABEL_CHAR_WIDTH = 6.6;
+const EDGE_LABEL_PAD_X = 12;
+const EDGE_LABEL_HEIGHT = 20;
+const EDGE_LABEL_LIFT = 18;
+
+function edgeLabelBoxWidth(label: string): number {
+  return Math.ceil(label.length * EDGE_LABEL_CHAR_WIDTH) + EDGE_LABEL_PAD_X * 2;
+}
+
+function EdgeHoverLabel({ label, x, y, stroke }: { label: string; x: number; y: number; stroke: string }) {
+  const width = edgeLabelBoxWidth(label);
+  return (
+    <g transform={`translate(${x}, ${y - EDGE_LABEL_LIFT})`}>
+      <rect
+        x={-width / 2}
+        y={-EDGE_LABEL_HEIGHT / 2}
+        width={width}
+        height={EDGE_LABEL_HEIGHT}
+        rx={4}
+        fill="rgb(var(--card))"
+        fillOpacity={0.94}
+        stroke={stroke}
+        strokeWidth={1}
+      />
+      <text
+        textAnchor="middle"
+        dominantBaseline="central"
+        fill="#e5e7eb"
+        fontSize={11}
+        fontFamily="ui-sans-serif, system-ui, sans-serif"
+      >
+        {label}
+      </text>
     </g>
   );
 }

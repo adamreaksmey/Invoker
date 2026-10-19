@@ -12,7 +12,11 @@ import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 import type { PlanDefinition } from '@invoker/workflow-core';
 import { hasReservedTaskIdPrefix, isPathSafeId, normalizeWorkflowBaseBranch, parseTaskFreshnessSpec, planPublicationAuthorityViolation } from '@invoker/workflow-core';
-import { isInvokerRepoUrl, reviewClaimSlices } from '@invoker/execution-engine';
+import {
+  formatMultipleReviewClaimsSinglePrError,
+  isInvokerRepoUrl,
+  reviewClaimSlices,
+} from '@invoker/execution-engine';
 import { loadConfig, resolveDefaultExecutionAgent, resolveForceExecution } from './config.js';
 import { normalizeMergeModeForPersistence } from './merge-mode.js';
 
@@ -661,9 +665,11 @@ function parseRawPlan(raw: RawPlan, ownerLabel = 'Plan'): PlanDefinition {
   ) {
     const claims = reviewClaimSlices(tasks.map((t) => ({ description: t.description, command: t.command })));
     if (claims.length > 1) {
-      throw new PlanParseError(
-        `${ownerLabel} carries ${claims.length} review claims, but it would publish as one PR; split the plan into a workflow chain with one claim per workflow: ${claims.map((claim) => `"${claim}"`).join('; ')}`,
-      );
+      throw new PlanParseError(formatMultipleReviewClaimsSinglePrError({
+        claimCount: claims.length,
+        claims,
+        subject: ownerLabel,
+      }));
     }
   }
 

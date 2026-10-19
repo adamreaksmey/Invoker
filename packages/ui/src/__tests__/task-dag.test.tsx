@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import * as ReactFlowModule from '@xyflow/react';
 import { TaskDAG } from '../components/TaskDAG.js';
@@ -96,8 +96,84 @@ describe('TaskDAG status filters', () => {
     const edge = await screen.findByTestId(`rf__edge-local:${setupTask.id}->${renderTask.id}`);
 
     await waitFor(() => {
-      expect(edge).toHaveAttribute('data-label', 'setup-task → render-task');
+      expect(edge).toHaveAttribute('data-label', 'Setup task → Render task');
     });
     expect(edge.getAttribute('data-label')).not.toContain('wf-alpha');
+  });
+
+  it('shows layer and feature-state pills plus the selected task summary', async () => {
+    const description = [
+      'Check ephemeral handoff artifacts',
+      'Layer: docs',
+      'Feature state: active',
+      'Review claim: Artifacts stay out of the repo',
+    ].join('\n');
+    const task = makeUITask({
+      id: 'wf-1/scrub-handoff-artifacts',
+      workflowId: 'wf-1',
+      status: 'completed',
+      description,
+      prompt: 'Check the completed handoff for ephemeral inter-task artifacts.',
+    });
+    const tasks = new Map<string, TaskState>([[task.id, task]]);
+    const workflows = new Map<string, WorkflowMeta>([
+      ['wf-1', { id: 'wf-1', name: 'Vue todo', status: 'review_ready' }],
+    ]);
+
+    const { rerender } = render(
+      <TaskDAG
+        tasks={tasks}
+        workflows={workflows}
+        selectedTaskId={task.id}
+      />,
+    );
+
+    await screen.findByTestId(`rf__node-${task.id}`);
+    expect(screen.getAllByText('docs').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('active').length).toBeGreaterThan(0);
+    expect(screen.queryByTestId('task-graph-selection-summary')).not.toBeInTheDocument();
+
+    rerender(
+      <TaskDAG
+        tasks={tasks}
+        workflows={workflows}
+        selectedTaskId={task.id}
+        surfaceMode="browser"
+      />,
+    );
+
+    const summary = screen.getByTestId('task-graph-selection-summary');
+    expect(summary).not.toHaveTextContent('Artifacts stay out of the repo');
+    fireEvent.click(screen.getByTestId('task-graph-selection-summary-toggle'));
+    expect(summary).toHaveTextContent('Artifacts stay out of the repo');
+    expect(summary).toHaveTextContent('Check the completed handoff for ephemeral inter-task artifacts.');
+  });
+
+  it('does not show a layer exception on a completed task card', async () => {
+    const exception = 'allowed — this repository hygiene check is the required terminal gate after the UI implementation, and it makes no product-layer changes.';
+    const description = [
+      'Review claim: The terminal check reports leaked handoff artifacts without changing repository state.',
+      'Layer: e2e_regression',
+      `Layer exception: ${exception}`,
+      'Feature state: active',
+    ].join('\n');
+    const task = makeUITask({
+      id: 'wf-1/scrub-handoff-artifacts',
+      workflowId: 'wf-1',
+      status: 'completed',
+      description,
+    });
+    const tasks = new Map<string, TaskState>([[task.id, task]]);
+    const workflows = new Map<string, WorkflowMeta>([
+      ['wf-1', { id: 'wf-1', name: 'Vue todo', status: 'completed' }],
+    ]);
+
+    render(<TaskDAG tasks={tasks} workflows={workflows} />);
+
+    const node = await screen.findByTestId(`rf__node-${task.id}`);
+    expect(node).toHaveTextContent('e2e_regression');
+    expect(node).toHaveTextContent('Completed');
+    expect(node).not.toHaveTextContent('Layer exception');
+    expect(node).not.toHaveTextContent('required terminal gate');
   });
 });

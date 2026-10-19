@@ -581,6 +581,9 @@ describe('publishAfterFixImpl integration (real git)', () => {
       const reviewReadyCall = (host.orchestrator.setTaskReviewReady as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(reviewReadyCall?.[1]?.execution).not.toHaveProperty('reviewUrl');
       expect(reviewReadyCall?.[1]?.execution).not.toHaveProperty('reviewGate');
+      expect(reviewReadyCall?.[1]?.execution?.reviewStatus).toContain('No pull request opened');
+      expect(reviewReadyCall?.[1]?.execution?.reviewStatus).toContain('plan/feature');
+      expect(reviewReadyCall?.[1]?.execution?.reviewStatus).toContain('master');
 
       git('fetch origin', hostDir);
       const diffStat = gitSilent('diff --stat master origin/plan/feature', hostDir);

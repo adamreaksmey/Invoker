@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { reviewClaimSlices } from '../pr-authoring.js';
+import {
+  formatMultipleReviewClaimsSinglePrError,
+  reviewClaimSlices,
+} from '../pr-authoring.js';
 import { publishReviewArtifactsForMerge, type MergeRunnerHost } from '../merge-runner.js';
 
 const behaviorPrompt = {
@@ -37,6 +40,18 @@ describe('reviewClaimSlices', () => {
 
   it('returns nothing for tasks without a review claim', () => {
     expect(reviewClaimSlices([{ description: 'Goal: tidy up.' }])).toEqual([]);
+  });
+});
+
+describe('formatMultipleReviewClaimsSinglePrError', () => {
+  it('truncates long claim lists for readable UI copy', () => {
+    const message = formatMultipleReviewClaimsSinglePrError({
+      claimCount: 4,
+      claims: ['A', 'B', 'C', 'D'],
+    });
+    expect(message).toMatch(/has 4 different review claims/);
+    expect(message).toContain('"A", "B", "C", and 1 more');
+    expect(message).not.toContain('"D"');
   });
 });
 
@@ -77,7 +92,7 @@ describe('single-PR publication of a workflow with more than one review claim', 
         expectedGeneration: 0,
         repoUrl: 'https://github.com/example/other.git',
       }),
-    ).rejects.toThrow(/carries 2 review claims/);
+    ).rejects.toThrow(/has 2 different review claims but would open only one PR/);
     expect(createReview).not.toHaveBeenCalled();
   });
 });

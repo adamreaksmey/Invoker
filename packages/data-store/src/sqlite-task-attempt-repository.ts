@@ -18,7 +18,7 @@ import {
   resolveTaskConfig,
 } from '@invoker/workflow-core';
 import { mapRowToTask, mapRowToAttempt } from './sqlite-row-mappers.js';
-import type { SqliteExecutor } from './sqlite-executor.js';
+import { SQLITE_READ_ONLY_PROCESS_ERROR, type SqliteExecutor } from './sqlite-executor.js';
 import type { CostAttributionAttempt } from './attempt-read-models.js';
 import { appendJournalEntry, appendJournalEntryWithoutReadback, LOCAL_SYNC_ORIGIN } from './sync-journal.js';
 import { SQLITE_MAX_VARIABLE_NUMBER } from './sqlite-workflow-repository.js';
@@ -1444,7 +1444,7 @@ export class SqliteTaskAttemptRepository {
     if (setClauses.length === 0) return false;
     values.push(attemptId, now.toISOString());
     if (this.exec.readOnly) {
-      throw new Error('SQLiteAdapter is read-only in this process');
+      throw new Error(SQLITE_READ_ONLY_PROCESS_ERROR);
     }
     return this.exec.runTransaction(() => {
       const beforeAttempt = this.exec.queryOne(

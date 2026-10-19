@@ -3247,15 +3247,21 @@ export class Orchestrator {
     });
   }
 
-  private assertMergeLeavesInvariant(workflowId: string): void {
-    assertMergeLeavesInvariantImpl(this as unknown as GraphMutationHost, workflowId);
-    assertMergeExperimentDependenciesInvariantImpl(this as unknown as GraphMutationHost, workflowId);
+  private reconcileAndAssertMergeInvariants(workflowId: string): void {
+    this.reconcileMergeLeaves(workflowId);
+    assertMergeExperimentDependenciesInvariantImpl(
+      this as unknown as GraphMutationHost,
+      workflowId,
+    );
   }
 
   /**
    * Load tasks from ALL workflows into the state machine.
    * Iterates over listWorkflows() -> loadTasks(wfId) for each.
    * The workflow FK is the single source of truth.
+   *
+   * Safety invariant: merge-leaf drift is healed from graph truth on restore;
+   * merge-experiment detachment still hard-fails.
    */
   syncAllFromDb(): void {
     this.stateMachine.clear();
@@ -3270,7 +3276,7 @@ export class Orchestrator {
       }
     }
     for (const wf of workflows) {
-      this.assertMergeLeavesInvariant(wf.id);
+      this.reconcileAndAssertMergeInvariants(wf.id);
     }
   }
 
@@ -3283,7 +3289,7 @@ export class Orchestrator {
    */
   syncFromDb(workflowId: string): void {
     this.refreshWorkflowFromDb(workflowId);
-    this.assertMergeLeavesInvariant(workflowId);
+    this.reconcileAndAssertMergeInvariants(workflowId);
   }
 
   /**
@@ -3293,7 +3299,7 @@ export class Orchestrator {
    */
   hydrateWorkflowFromDb(workflowId: string): void {
     this.refreshWorkflowFromDb(workflowId);
-    this.assertMergeLeavesInvariant(workflowId);
+    this.reconcileAndAssertMergeInvariants(workflowId);
   }
 
   /**
@@ -3434,7 +3440,9 @@ export class Orchestrator {
 
   detachWorkflow(workflowId: string, upstreamWorkflowId: string): void {
     this.syncAllFromDb();
-    this.detachWorkflowInternal(workflowId, upstreamWorkflowId);
+    this.detachWorkflowInternal(workflowId, upstreamWorkflowId, undefined, {
+      skipDownstreamInvalidation: true,
+    });
   }
 
   /**
@@ -3547,7 +3555,6 @@ export class Orchestrator {
       action: 'added',
     });
 
-    this.autoStartExternallyUnblockedReadyTasks();
     this.checkWorkflowCompletion(workflowId);
   }
 
@@ -4542,6 +4549,13 @@ export class Orchestrator {
       upstreamWorkflowId,
       action: 'removed',
     });
+
+    if (options?.skipDownstreamInvalidation) {
+      this.persistence.logEvent?.(eventTask.id, 'task.workflow_detached', {
+        workflowId,
+        upstreamWorkflowId,
+      });
+    }
 
     if (!options?.skipDownstreamInvalidation) {
       const affectedWorkflowIds = [workflowId, ...this.collectDownstreamWorkflowIds(workflowId)];

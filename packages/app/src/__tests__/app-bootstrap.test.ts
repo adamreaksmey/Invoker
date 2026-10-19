@@ -6,6 +6,7 @@ import {
   configureEarlyElectronApp,
   formatGuiOwnerBootstrapFallbackMessage,
   guiAutoOwnerBootstrapTimeoutMs,
+  guiLockConflictOwnerWaitMs,
   guiOwnerBootstrapTimeoutMs,
   isMutationOwnerUnavailableError,
   registerGuiLifecycleHandlers,
@@ -336,7 +337,9 @@ describe('app-bootstrap', () => {
     expect(guiOwnerBootstrapTimeoutMs({ INVOKER_GUI_OWNER_BOOTSTRAP_TIMEOUT_MS: '-1' })).toBe(60000);
     expect(guiOwnerBootstrapTimeoutMs({ INVOKER_HEADLESS_OWNER_BOOTSTRAP_TIMEOUT_MS: '1200' })).toBe(1200);
     expect(guiAutoOwnerBootstrapTimeoutMs({ INVOKER_GUI_AUTO_OWNER_BOOTSTRAP_TIMEOUT_MS: '900' })).toBe(900);
-    expect(guiAutoOwnerBootstrapTimeoutMs({ INVOKER_GUI_AUTO_OWNER_BOOTSTRAP_TIMEOUT_MS: '0' })).toBe(5000);
+    expect(guiAutoOwnerBootstrapTimeoutMs({ INVOKER_GUI_AUTO_OWNER_BOOTSTRAP_TIMEOUT_MS: '0' })).toBe(20000);
+    expect(guiLockConflictOwnerWaitMs({ INVOKER_GUI_LOCK_CONFLICT_OWNER_WAIT_MS: '0' })).toBe(20000);
+    expect(guiLockConflictOwnerWaitMs({ INVOKER_GUI_LOCK_CONFLICT_OWNER_WAIT_MS: '4000' })).toBe(4000);
   });
 
   it('formats daemon bootstrap failures with a local owner recovery path', () => {

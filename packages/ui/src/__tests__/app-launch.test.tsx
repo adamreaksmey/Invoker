@@ -50,6 +50,7 @@ describe('App launch (component)', () => {
   beforeEach(() => {
     mock = createMockInvoker();
     mock.install();
+    window.localStorage.removeItem('invoker.planningContextPanelWidth');
   });
 
   afterEach(() => {
@@ -66,7 +67,7 @@ describe('App launch (component)', () => {
     expect(await screen.findByText('What do you want to build?')).toBeInTheDocument();
     expect(screen.getByTestId('planning-session-rail')).toBeInTheDocument();
     expect(screen.getByTestId('planning-session-rail')).toHaveClass('w-64');
-    expect(screen.getByTestId('planning-context-panel')).toHaveClass('w-16');
+    expect(screen.getByTestId('planning-context-panel')).toHaveStyle({ width: '64px' });
     expect(screen.getByTestId('app-sidebar')).toHaveClass('w-16');
     expect(screen.getByTestId('sidebar-home')).toBeInTheDocument();
     expect(screen.getByTestId('sidebar-home')).toHaveTextContent('');

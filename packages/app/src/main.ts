@@ -11,6 +11,7 @@ import {
   createDaemonOwnerLossController,
   formatGuiOwnerBootstrapFallbackMessage,
   guiAutoOwnerBootstrapTimeoutMs,
+  guiLockConflictOwnerWaitMs,
   guiOwnerBootstrapTimeoutMs,
   isMutationOwnerUnavailableError,
   shouldBootstrapDaemonOwner,
@@ -83,6 +84,7 @@ import type {
   StartReadyRequest,
   StartReadyResult,
   WorkerStatusSnapshot,
+  WorkflowMutationFailedEvent,
 } from '@invoker/contracts';
 import { ConversationRepository, SqliteTaskRepository, hasLiveWritableOwner } from '@invoker/data-store';
 import type { SQLiteAdapter } from '@invoker/data-store';
@@ -321,6 +323,10 @@ import {
   submitPlanningChatDraft,
 } from './in-app-planner.js';
 import { discoverOwner, isStandaloneCapable } from './owner-endpoint.js';
+import {
+  forwardViewerWorkflowMutationFailure,
+  reportWorkflowMutationFailure,
+} from './workflow-mutation-failure-notice.js';
 import type { PlanningCommandBuilder } from '@invoker/surfaces';
 import { createRealSlackBugScanClient, createSlackBugScanClassifier } from '@invoker/slack-bug-scan';
 import { createSlackBugScanPlanner } from './slack-bug-scan-planner.js';
@@ -914,6 +920,16 @@ function updateInvokerCliFromMenu(): void {
     message: 'Update invoker-cli',
     detail,
   });
+}
+
+let sendMutationFailureToRenderer: (event: WorkflowMutationFailedEvent) => void = () => {};
+
+function reportOwnerWorkflowMutationFailure(event: WorkflowMutationFailedEvent): void {
+  reportWorkflowMutationFailure(
+    event,
+    (notice) => messageBus.publish(Channels.WORKFLOW_MUTATION_FAILED, notice),
+    (notice) => sendMutationFailureToRenderer(notice),
+  );
 }
 
 async function initServices(options?: InitServicesOptions): Promise<void> {
@@ -2029,7 +2045,11 @@ function startHeadlessMode(): void {
                 activeMutationContext = undefined;
               }
             },
-            { logger, chokeMetrics: getChokeBoundaryMetrics() },
+            {
+              logger,
+              chokeMetrics: getChokeBoundaryMetrics(),
+              onIntentFailed: reportOwnerWorkflowMutationFailure,
+            },
           );
         }
 
@@ -2454,6 +2474,10 @@ startMainProcessBootstrap({
   let startupWorkflowId: string | null = null;
   const startupWorkflowCache = createStartupWorkflowCache();
   let uiInteractive = false;
+  sendMutationFailureToRenderer = (event) => {
+    if (!mainWindow || mainWindow.isDestroyed() || !uiInteractive) return;
+    mainWindow.webContents.send('invoker:workflow-mutation-failed', event);
+  };
   let deferredStartupTriggered = false;
   const traceUiDeltaFlow = process.env.INVOKER_TRACE_UI_DELTA === '1';
   const traceUiWorkflowDeltaFlow = process.env.INVOKER_TRACE_UI_WORKFLOW_DELTA === '1';
@@ -3078,7 +3102,8 @@ startMainProcessBootstrap({
           app.quit();
           return;
         }
-        const owner = await discoverOwner(messageBus, 1500);
+        const ownerAttached = await discoverStandaloneOwnerForGui(guiLockConflictOwnerWaitMs());
+        const owner = ownerAttached ? await discoverOwner(messageBus, 1500) : null;
         if (!isStandaloneCapable(owner)) {
           process.stderr.write(`${RED}Error:${RESET} ${message}\n`);
           process.stderr.write(`${RED}Detached viewer fallback requires a reachable owner, but no owner answered IPC.\n${RESET}`);
@@ -3256,10 +3281,7 @@ startMainProcessBootstrap({
         },
         {
           logger,
-          onIntentFailed: (event) => {
-            if (!mainWindow || mainWindow.isDestroyed() || !uiInteractive) return;
-            mainWindow.webContents.send('invoker:workflow-mutation-failed', event);
-          },
+          onIntentFailed: reportOwnerWorkflowMutationFailure,
           chokeMetrics: getChokeBoundaryMetrics(),
         },
       );
@@ -3625,6 +3647,13 @@ startMainProcessBootstrap({
       if (mainWindow && !mainWindow.isDestroyed() && uiInteractive) {
         mainWindow.webContents.send('invoker:task-output', data);
       }
+    });
+    messageBus.subscribe(Channels.WORKFLOW_MUTATION_FAILED, (event: unknown) => {
+      forwardViewerWorkflowMutationFailure(
+        ownerMode,
+        event as WorkflowMutationFailedEvent,
+        sendMutationFailureToRenderer,
+      );
     });
 
     const computeOwnershipRuntimeStatus = () => {

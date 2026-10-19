@@ -12,6 +12,7 @@ import {
   plannerOutputIndicatesAuthFailure,
   plannerOutputIndicatesAuthLimbo,
   redactEmbeddedPlanFence,
+  formatUserFacingPlanningDraftReply,
 } from '../slack/plan-conversation.js';
 import type { PlannerAuthPreflightCommandRunner } from '@invoker/execution-engine';
 
@@ -651,6 +652,12 @@ describe('PlanConversation', () => {
     expect(conversational.lastTurnDraftPlanText).toContain('Test Plan');
   });
 
+  it('replaces doctor repair chatter with the draft placeholder when no yaml fence is present', () => {
+    const repairChatter = 'Fixed ensure-scrub-handoff-script by writing a POSIX scrub script.';
+    expect(formatUserFacingPlanningDraftReply(repairChatter)).toContain('Plan drafted');
+    expect(formatUserFacingPlanningDraftReply(repairChatter)).not.toContain('ensure-scrub-handoff-script');
+  });
+
   it('submittedPlanText is null before confirmation', async () => {
     expect(conversation.submittedPlanText).toBeNull();
     mockCursorResponse(VALID_YAML_PLAN);
@@ -740,7 +747,12 @@ describe('PlanConversation', () => {
 
   it('emits raw stdout chunks in order before the planner closes', async () => {
     const chunks: string[] = [];
-    const conv = new PlanConversation({ onRawPlannerOutput: (chunk) => chunks.push(chunk) });
+    const conv = new PlanConversation({
+      authPreflightEnabled: false,
+      onRawPlannerOutput: (payload) => {
+        if (typeof payload === 'string') chunks.push(payload);
+      },
+    });
     const proc = new EventEmitter() as any;
     proc.stdout = new EventEmitter();
     proc.stderr = new EventEmitter();
@@ -748,7 +760,9 @@ describe('PlanConversation', () => {
     mockSpawn.mockReturnValueOnce(proc);
 
     const promise = conv.sendMessage('Hello');
-    await Promise.resolve();
+    await vi.waitFor(() => {
+      expect(proc.stdout.listenerCount('data')).toBeGreaterThan(0);
+    });
 
     proc.stdout.emit('data', Buffer.from('chunk1'));
     expect(chunks).toEqual(['chunk1']);
@@ -760,9 +774,13 @@ describe('PlanConversation', () => {
     await expect(promise).resolves.toBe('chunk1chunk2');
   });
 
-  it('keeps the final reply and assistant history as the assembled stdout', async () => {
-    const chunks: string[] = [];
-    const conv = new PlanConversation({ onRawPlannerOutput: (chunk) => chunks.push(chunk) });
+  it('emits an asking label before stdout chunks arrive', async () => {
+    const updates: Array<string | { statusLabel: string }> = [];
+    const conv = new PlanConversation({
+      authPreflightEnabled: false,
+      plannerRetryLimit: 0,
+      onRawPlannerOutput: (payload) => updates.push(payload),
+    });
     const proc = new EventEmitter() as any;
     proc.stdout = new EventEmitter();
     proc.stderr = new EventEmitter();
@@ -770,7 +788,36 @@ describe('PlanConversation', () => {
     mockSpawn.mockReturnValueOnce(proc);
 
     const promise = conv.sendMessage('Hello');
-    await Promise.resolve();
+    await vi.waitFor(() => {
+      expect(updates.some((update) => typeof update === 'object' && 'statusLabel' in update)).toBe(true);
+    });
+
+    expect(updates.find((update) => typeof update === 'object' && 'statusLabel' in update)).toEqual({
+      statusLabel: expect.stringMatching(/^Asking /),
+    });
+    proc.stdout.emit('data', Buffer.from('ok'));
+    proc.emit('close', 0);
+    await expect(promise).resolves.toBe('ok');
+  });
+
+  it('keeps the final reply and assistant history as the assembled stdout', async () => {
+    const chunks: string[] = [];
+    const conv = new PlanConversation({
+      authPreflightEnabled: false,
+      onRawPlannerOutput: (payload) => {
+        if (typeof payload === 'string') chunks.push(payload);
+      },
+    });
+    const proc = new EventEmitter() as any;
+    proc.stdout = new EventEmitter();
+    proc.stderr = new EventEmitter();
+    proc.kill = vi.fn();
+    mockSpawn.mockReturnValueOnce(proc);
+
+    const promise = conv.sendMessage('Hello');
+    await vi.waitFor(() => {
+      expect(proc.stdout.listenerCount('data')).toBeGreaterThan(0);
+    });
 
     proc.stdout.emit('data', Buffer.from('  final '));
     proc.stdout.emit('data', Buffer.from('reply  '));
@@ -840,7 +887,11 @@ describe('PlanConversation', () => {
     const conv = new PlanConversation({
       threadTs: 'ts-stream-fail',
       conversationRepo: repo as any,
-      onRawPlannerOutput: (chunk) => chunks.push(chunk),
+      authPreflightEnabled: false,
+      plannerRetryLimit: 0,
+      onRawPlannerOutput: (payload) => {
+        if (typeof payload === 'string') chunks.push(payload);
+      },
     });
     const proc = new EventEmitter() as any;
     proc.stdout = new EventEmitter();
@@ -849,7 +900,9 @@ describe('PlanConversation', () => {
     mockSpawn.mockReturnValueOnce(proc);
 
     const promise = conv.sendMessage('Hello');
-    await Promise.resolve();
+    await vi.waitFor(() => {
+      expect(proc.stdout.listenerCount('data')).toBeGreaterThan(0);
+    });
 
     proc.stdout.emit('data', Buffer.from('partial '));
     proc.stdout.emit('data', Buffer.from('reply'));

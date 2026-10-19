@@ -87,7 +87,7 @@ describe('restored in-app planning chat conversational mode', () => {
 
     expect(result.ok).toBe(true);
     expect(prompt).toContain('conversational planning mode');
-    expect(prompt).toContain('the in-app host stages that exact draft in its review panel');
+    expect(prompt).toContain('YAML that only appears in the chat reply is not a saved draft');
     expect(prompt).toContain('Current planning host: Invoker in-app planner.');
     expect(prompt).not.toContain('Generate a YAML task plan');
     expect(prompt).not.toContain('Current planning host: Invoker Slack planner.');

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeWorkflowStatus, workflowStatusVisual } from './workflow-status.js';
+import { isWorkflowBuilt, normalizeWorkflowStatus, workflowStatusVisual } from './workflow-status.js';
 import { getStatusVisual } from './status-colors.js';
 import type { WorkflowStatus } from '../types.js';
 
@@ -46,6 +46,16 @@ describe('workflow-status', () => {
     expect(normalizeWorkflowStatus('CLOSED')).toBe('closed');
     // Closed is terminal-neutral, not a fallback to pending.
     expect(normalizeWorkflowStatus('closed')).not.toBe('pending');
+  });
+
+  it('treats completed, review-ready, and approval gates as built', () => {
+    expect(isWorkflowBuilt('completed')).toBe(true);
+    expect(isWorkflowBuilt('review_ready')).toBe(true);
+    expect(isWorkflowBuilt('awaiting_approval')).toBe(true);
+    expect(isWorkflowBuilt('running')).toBe(false);
+    expect(isWorkflowBuilt('pending')).toBe(false);
+    expect(isWorkflowBuilt('failed')).toBe(false);
+    expect(isWorkflowBuilt(undefined)).toBe(false);
   });
 
   it('gives closed a non-pulsing visual distinct from failed and review_ready', () => {

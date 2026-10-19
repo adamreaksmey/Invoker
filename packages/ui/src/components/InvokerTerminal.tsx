@@ -1,17 +1,42 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { Terminal as XTermTerminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
+import { PLANNING_CLONE_IN_PROGRESS } from '@invoker/contracts/planning-clone-status';
 import type { TerminalSessionDescriptor } from '@invoker/contracts';
 import type { PlanningConfirmationMode } from '@invoker/contracts';
 import {
   collapsePlanningChatLines,
+  formatPlanningChatTimestamp,
   groupPlanningChatLines,
   presentPlanningChatError,
   splitPlanningChatInlineCode,
   type PlanningChatCollapsedLine,
 } from '../lib/planning-chat-message-ui.js';
 import { Button } from './primitives/Button.js';
-import { AlertCircleIcon, RefreshIcon, SendIcon, StopIcon } from './icons/index.js';
+import { AlertCircleIcon, RefreshIcon, StopIcon } from './icons/index.js';
+import { MarkdownText } from './MarkdownText.js';
+import { PlanningChatComposer } from './PlanningChatComposer.js';
+
+const REPO_VALIDATION_WAIT_MESSAGE = 'Validating the repository. Please wait.';
+
+function RepoValidationCover(): JSX.Element {
+  return (
+    <div
+      className="absolute inset-0 z-20 flex items-center justify-center bg-background/85 px-6"
+      data-testid="invoker-terminal-repo-validating"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="flex max-w-sm flex-col items-center gap-3 text-center">
+        <span
+          aria-hidden="true"
+          className="h-5 w-5 animate-spin rounded-full border-2 border-muted-foreground border-t-foreground"
+        />
+        <p className="text-sm text-foreground">{REPO_VALIDATION_WAIT_MESSAGE}</p>
+      </div>
+    </div>
+  );
+}
 
 export interface InvokerTerminalLine {
   id: number;
@@ -19,6 +44,7 @@ export interface InvokerTerminalLine {
   role: 'user' | 'assistant' | 'system';
   reasoning?: string;
   tone?: 'muted' | 'error' | 'success';
+  createdAt?: string;
 }
 
 export type PlanningTerminalMode = 'chat' | 'tmux';
@@ -26,6 +52,7 @@ export type PlanningTerminalMode = 'chat' | 'tmux';
 export interface InvokerTerminalPlanningStream {
   text: string;
   status: 'streaming' | 'failed';
+  statusLabel?: string;
 }
 
 export interface PlanningPresetOptionView {
@@ -56,7 +83,12 @@ export function isPlanningCancelledFailure(message: string | null | undefined): 
     || trimmed.endsWith(`\n${PLANNING_TURN_CANCELLED_MESSAGE}`);
 }
 
-function planningStreamStatusLabel(stream: InvokerTerminalPlanningStream | null | undefined): string {
+export function planningStreamStatusLabel(
+  stream: InvokerTerminalPlanningStream | null | undefined,
+  progressLabel?: string | null,
+): string {
+  const progress = progressLabel?.trim() || stream?.statusLabel?.trim();
+  if (progress) return progress;
   if (!stream) return 'Working…';
   if (stream.status !== 'failed') return 'Drafting your plan…';
   return isPlanningCancelledFailure(stream.text)
@@ -167,8 +199,10 @@ interface InvokerTerminalProps {
     taskGroups?: { workflow: string | null; tasks: string[] }[];
   };
   planningStream?: InvokerTerminalPlanningStream | null;
+  planningProgressLabel?: string | null;
   readOnly?: boolean;
   readOnlyReason?: 'submitted' | 'window';
+  repositoryLocked?: boolean;
   expanded?: boolean;
   mode?: PlanningTerminalMode;
   terminalSession?: TerminalSessionDescriptor | null;
@@ -176,10 +210,14 @@ interface InvokerTerminalProps {
   terminalError?: string | null;
   terminalActive?: boolean;
   workflowRunning?: boolean;
+  submittedWorkBuilt?: boolean;
   repoValue?: string;
-  repoLocked?: boolean;
+  baseBranchValue?: string;
+  repoBound?: boolean;
+  repoEditing?: boolean;
   repoSuggestions?: string[];
   repoError?: string | null;
+  repoNotice?: string | null;
   turnError?: string | null;
   onRetryTurn?: () => void;
   onCancelTurn?: () => void;
@@ -188,7 +226,9 @@ interface InvokerTerminalProps {
   onPresetChange: (presetKey: string) => void;
   onConfirmationModeChange: (confirmationMode: PlanningConfirmationMode) => void;
   onRepoInputChange?: (value: string) => void;
+  onBaseBranchInputChange?: (value: string) => void;
   onRepoCommit?: () => void;
+  onRepoEdit?: () => void;
   onModeChange?: (mode: PlanningTerminalMode) => void;
   onExpand: () => void;
   onCloseExpanded?: () => void;
@@ -241,9 +281,11 @@ function MessageBody({ text, toneClass }: { text: string; toneClass: string }): 
         const prose = segment.text.replace(/^\n+|\n+$/g, '');
         if (!prose) return null;
         return (
-          <div key={`prose-${index}`} className="whitespace-pre-wrap font-sans text-[13.5px] leading-6">
-            {prose}
-          </div>
+          <MarkdownText
+            key={`prose-${index}`}
+            text={prose}
+            className="font-sans text-[13.5px] leading-6"
+          />
         );
       })}
     </div>
@@ -274,22 +316,34 @@ function InlineCodeBody({ text }: { text: string }): JSX.Element {
   );
 }
 
+function MessageTimestamp({ createdAt }: { createdAt?: string }): JSX.Element | null {
+  const label = formatPlanningChatTimestamp(createdAt);
+  if (!label || !createdAt) return null;
+  return (
+    <time
+      dateTime={createdAt}
+      data-testid="invoker-terminal-message-time"
+      className="mt-1 text-[11px] leading-4 text-muted-foreground"
+    >
+      {label}
+    </time>
+  );
+}
+
 function UserMessageBubble({
   text,
-  isLastInGroup,
+  createdAt,
 }: {
   text: string;
-  isLastInGroup: boolean;
+  createdAt?: string;
 }): JSX.Element {
-  const radiusClass = isLastInGroup
-    ? 'rounded-[16px] rounded-br-[4px]'
-    : 'rounded-[16px]';
   return (
     <div className="flex justify-end" data-testid="invoker-terminal-user-bubble">
-      <div
-        className={`max-w-[70%] bg-planning-chat-user/15 px-[14px] py-[9px] text-left text-[15px] leading-[1.5] text-foreground ${radiusClass}`}
-      >
-        <div className="whitespace-pre-wrap font-sans">{text}</div>
+      <div className="flex w-fit max-w-[70%] flex-col items-end">
+        <div className="whitespace-pre-wrap rounded-2xl bg-planning-chat-user/15 px-3.5 py-2 text-left text-[15px] leading-5 text-foreground">
+          {text}
+        </div>
+        <MessageTimestamp createdAt={createdAt} />
       </div>
     </div>
   );
@@ -303,6 +357,7 @@ function SystemErrorBanner({
   retryDisabled,
   onRetry,
   isActiveTurnError,
+  createdAt,
 }: {
   text: string;
   count: number;
@@ -311,6 +366,7 @@ function SystemErrorBanner({
   retryDisabled: boolean;
   onRetry?: () => void;
   isActiveTurnError: boolean;
+  createdAt?: string;
 }): JSX.Element {
   const presentation = presentPlanningChatError(text);
   const radiusClass = isLastInGroup
@@ -323,12 +379,13 @@ function SystemErrorBanner({
   };
 
   return (
-    <div className="flex justify-start">
-      <div
-        role="alert"
-        data-testid={isActiveTurnError ? 'invoker-terminal-turn-error' : 'invoker-terminal-error-banner'}
-        className={`flex max-w-[85%] gap-2.5 border-[0.5px] border-destructive/40 bg-destructive/10 px-3.5 py-3 ${radiusClass}`}
-      >
+    <div className="flex flex-col items-start">
+      <div className="flex justify-start">
+        <div
+          role="alert"
+          data-testid={isActiveTurnError ? 'invoker-terminal-turn-error' : 'invoker-terminal-error-banner'}
+          className={`flex max-w-[85%] gap-2.5 border-[0.5px] border-destructive/40 bg-destructive/10 px-3.5 py-3 ${radiusClass}`}
+        >
         <AlertCircleIcon
           aria-hidden="true"
           className="mt-0.5 h-[18px] w-[18px] shrink-0 text-destructive"
@@ -386,21 +443,38 @@ function SystemErrorBanner({
         </div>
       </div>
     </div>
-  );
-}
-
-function SystemNotice({ text }: { text: string }): JSX.Element {
-  return (
-    <div className="max-w-[85%] text-[13px] leading-5 text-muted-foreground" data-testid="invoker-terminal-system-notice">
-      <div className="whitespace-pre-wrap font-sans">{text}</div>
+      <MessageTimestamp createdAt={createdAt} />
     </div>
   );
 }
 
-function AssistantMessage({ text }: { text: string }): JSX.Element {
+function SystemNotice({
+  text,
+  tone,
+  createdAt,
+}: {
+  text: string;
+  tone?: 'muted' | 'error' | 'success';
+  createdAt?: string;
+}): JSX.Element {
+  const toneClass = tone === 'success' ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground';
   return (
-    <div className="max-w-[90%]" data-testid="invoker-terminal-assistant-message">
-      <MessageBody text={text} toneClass="text-foreground" />
+    <div className="flex flex-col items-start">
+      <div className={`max-w-[85%] text-[13px] leading-5 ${toneClass}`} data-testid="invoker-terminal-system-notice">
+        <div className="whitespace-pre-wrap font-sans">{text}</div>
+      </div>
+      <MessageTimestamp createdAt={createdAt} />
+    </div>
+  );
+}
+
+function AssistantMessage({ text, createdAt }: { text: string; createdAt?: string }): JSX.Element {
+  return (
+    <div className="flex max-w-[90%] flex-col items-start">
+      <div data-testid="invoker-terminal-assistant-message">
+        <MessageBody text={text} toneClass="text-foreground" />
+      </div>
+      <MessageTimestamp createdAt={createdAt} />
     </div>
   );
 }
@@ -417,12 +491,12 @@ function renderCollapsedLine(
       <UserMessageBubble
         key={item.id}
         text={item.text}
-        isLastInGroup={isLastInGroup}
+        createdAt={item.createdAt}
       />
     );
   }
   if (item.kind === 'assistant') {
-    return <AssistantMessage key={item.id} text={item.text} />;
+    return <AssistantMessage key={item.id} text={item.text} createdAt={item.createdAt} />;
   }
   if (item.kind === 'system-error') {
     const isActiveTurnError = Boolean(turnError && item.text === turnError);
@@ -436,10 +510,11 @@ function renderCollapsedLine(
         retryDisabled={busy}
         onRetry={onRetryTurn}
         isActiveTurnError={isActiveTurnError}
+        createdAt={item.createdAt}
       />
     );
   }
-  return <SystemNotice key={item.id} text={item.text} />;
+  return <SystemNotice key={item.id} text={item.text} tone={item.tone} createdAt={item.createdAt} />;
 }
 
 type SeededOutputSnapshot = {
@@ -784,8 +859,10 @@ export function InvokerTerminal({
   draftReviewOpen = false,
   draftPlanSummary,
   planningStream,
+  planningProgressLabel = null,
   readOnly = false,
   readOnlyReason = 'submitted',
+  repositoryLocked = false,
   expanded = false,
   mode = 'chat',
   terminalSession = null,
@@ -793,19 +870,25 @@ export function InvokerTerminal({
   terminalError = null,
   terminalActive = true,
   workflowRunning = false,
+  submittedWorkBuilt = false,
   onValueChange,
   onSubmit,
   repoValue = '',
-  repoLocked = true,
+  baseBranchValue = '',
+  repoBound = false,
+  repoEditing = false,
   repoSuggestions = [],
   repoError = null,
+  repoNotice = null,
   turnError = null,
   onRetryTurn,
   onCancelTurn,
   onPresetChange,
   onConfirmationModeChange,
   onRepoInputChange,
+  onBaseBranchInputChange,
   onRepoCommit,
+  onRepoEdit,
   onModeChange,
   onExpand,
   onCloseExpanded,
@@ -818,7 +901,6 @@ export function InvokerTerminal({
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const [shouldFollowTranscript, setShouldFollowTranscript] = useState(true);
-  const [showComposerOptions, setShowComposerOptions] = useState(false);
   const inputSequenceRef = useRef(0);
   const latestLineCountRef = useRef(lines.length);
   const perfContextRef = useRef({ activeConversationKey, expanded });
@@ -925,7 +1007,8 @@ export function InvokerTerminal({
   };
 
   const composerDisabledCursorClass = busy || readOnly ? 'disabled:cursor-not-allowed' : '';
-  const sendButtonDisabled = busy || binding || readOnly || !value.trim();
+  const repoMissing = !repoValue.trim();
+  const sendButtonDisabled = busy || binding || readOnly || !value.trim() || repoMissing;
   const sendButtonDisabledCursorClass = 'disabled:cursor-not-allowed';
   const harnessChoices = useMemo(() => buildPlanningHarnessChoices(presetOptions), [presetOptions]);
   const hasPlanningTools = harnessChoices.length > 0;
@@ -959,8 +1042,6 @@ export function InvokerTerminal({
       },
     ];
   }, [selectedHarness, selectedPresetKey]);
-  const recommendedModelOptions = modelSelectOptions.filter((option) => option.section !== 'more');
-  const moreModelOptions = modelSelectOptions.filter((option) => option.section === 'more');
   const showModelSelect = Boolean(selectedHarness && selectedHarness.modelPresets.length > 0);
   const selectedModelPresetKey = selectedPresetKey || modelSelectOptions[0]?.key || '';
 
@@ -1076,14 +1157,16 @@ export function InvokerTerminal({
                 className="inline-block h-2.5 w-2.5 shrink-0 animate-spin rounded-full border border-muted-foreground border-t-foreground"
               />
             )}
-            <span>{planningStreamStatusLabel(planningStream)}</span>
+            <span>{planningStreamStatusLabel(planningStream, planningProgressLabel)}</span>
           </div>
         ) : null}
       </div>
     );
-  }, [busy, lines, onRetryTurn, planningStream, readOnly, turnError]);
+  }, [busy, lines, onRetryTurn, planningProgressLabel, planningStream, readOnly, turnError]);
+  const showDraftReadyBar = draftPlanAvailable && !draftReviewOpen && !readOnly && !(submittedWorkBuilt && repositoryLocked);
+  const showSubmittedPlanBar = Boolean(submittedPlanName && onOpenGraph) && !submittedWorkBuilt;
   return (
-    <section className="flex h-full min-h-0 flex-col bg-background">
+    <section className="relative flex h-full min-h-0 flex-col bg-background">
       <div className="flex items-center justify-end gap-2 border-b border-border bg-background px-4 py-2.5">
         <div className="flex shrink-0 items-center gap-2">
           {onModeChange && (
@@ -1188,7 +1271,7 @@ export function InvokerTerminal({
             )}
           </div>
 
-          {draftPlanAvailable && !draftReviewOpen && !readOnly && (
+          {showDraftReadyBar && (
             <div
               data-testid="invoker-terminal-ready-bar"
               className="sticky bottom-0 z-10 border-t border-border bg-card/80 px-4 py-3.5 text-sm text-foreground backdrop-blur-sm"
@@ -1220,7 +1303,7 @@ export function InvokerTerminal({
             </div>
           )}
 
-          {readOnly && submittedPlanName && onOpenGraph && (
+          {showSubmittedPlanBar && (
             <div
               data-testid="invoker-terminal-submitted-bar"
               className="sticky bottom-0 z-10 border-t border-border bg-card/80 px-4 py-3.5 text-sm text-foreground backdrop-blur-sm"
@@ -1253,194 +1336,55 @@ export function InvokerTerminal({
             </div>
           )}
 
-          <form
-            className="border-t border-border bg-background px-4 py-3.5"
-            onSubmit={handleFormSubmit}
-          >
-            <div className="rounded-xl border border-border bg-card/40 px-3 py-1.5 focus-within:border-border-strong">
-              <textarea
-                ref={inputRef}
-                data-testid="invoker-terminal-input"
-                value={value}
-                disabled={busy || binding || readOnly}
-                rows={expanded ? 5 : 1}
-                onChange={handleValueChange}
-                onKeyDown={handleInputKeyDown}
-                placeholder={readOnly
-                  ? readOnlyReason === 'window'
-                    ? 'This window is read-only.'
-                    : 'This planning session was already submitted.'
-                  : 'Describe what you want to build'}
-                className={`min-h-9 w-full resize-none border-0 bg-transparent py-1 font-sans text-[13.5px] leading-6 text-foreground outline-none placeholder:text-muted-foreground focus:ring-0 ${composerDisabledCursorClass}`}
-              />
-              <div className="mt-1 flex flex-wrap items-center justify-between gap-3 pt-2">
-                <div>
-                  <button
-                    type="button"
-                    aria-expanded={showComposerOptions}
-                    onClick={() => setShowComposerOptions((visible) => !visible)}
-                    className="text-xs text-muted-foreground hover:text-foreground"
-                  >
-                    Options
-                  </button>
-                  {showComposerOptions && (
-                    <div className="ml-3 flex flex-wrap items-center gap-3">
-                      <label className="text-xs text-muted-foreground">
-                        Harness
-                        <select
-                          data-testid="invoker-terminal-harness"
-                          value={selectedHarnessValue}
-                          onChange={handleHarnessChange}
-                          disabled={readOnly || !hasPlanningTools}
-                          className="ml-2 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground outline-none hover:border-border-strong focus:border-ring disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {harnessChoices.map((option) => (
-                            <option key={option.tool} value={option.tool}>{option.label}</option>
-                          ))}
-                        </select>
-                      </label>
-                      {showModelSelect && (
-                        <label className="text-xs text-muted-foreground">
-                          Model
-                          <select
-                            data-testid="invoker-terminal-model"
-                            value={selectedModelPresetKey}
-                            onChange={(event) => onPresetChange(event.target.value)}
-                            disabled={readOnly || planningPresetsLoading}
-                            className="ml-2 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground outline-none hover:border-border-strong focus:border-ring disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {planningPresetsLoading && modelSelectOptions.length === 0 && (
-                              <option value="">Loading models…</option>
-                            )}
-                            {recommendedModelOptions.length > 0 && moreModelOptions.length > 0 ? (
-                              <>
-                                <optgroup label="Recommended">
-                                  {recommendedModelOptions.map((option) => (
-                                    <option key={option.key} value={option.key}>
-                                      {formatPlanningModelOptionLabel(option)}
-                                    </option>
-                                  ))}
-                                </optgroup>
-                                <optgroup label="More…">
-                                  {moreModelOptions.map((option) => (
-                                    <option key={option.key} value={option.key}>
-                                      {formatPlanningModelOptionLabel(option)}
-                                    </option>
-                                  ))}
-                                </optgroup>
-                              </>
-                            ) : (
-                              modelSelectOptions.map((option) => (
-                                <option key={option.key} value={option.key}>
-                                  {formatPlanningModelOptionLabel(option)}
-                                </option>
-                              ))
-                            )}
-                          </select>
-                        </label>
-                      )}
-                      {planningPresetsLoading && (
-                        <span
-                          data-testid="invoker-terminal-models-loading"
-                          className="text-[11px] text-muted-foreground"
-                        >
-                          Checking Cursor models…
-                        </span>
-                      )}
-                      {cursorDiscoveryWarning && !planningPresetsLoading && (
-                        <span
-                          data-testid="invoker-terminal-models-warning"
-                          className="max-w-md text-[11px] text-amber-600 dark:text-amber-400"
-                          title={cursorDiscoveryWarning}
-                        >
-                          {cursorDiscoveryWarning}
-                        </span>
-                      )}
-                      <label className="text-xs text-muted-foreground">
-                        Review
-                        <select
-                          data-testid="invoker-terminal-confirmation-mode"
-                          value={selectedConfirmationMode}
-                          onChange={(event) => onConfirmationModeChange(event.target.value as PlanningConfirmationMode)}
-                          disabled={readOnly}
-                          className="ml-2 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground outline-none hover:border-border-strong focus:border-ring"
-                        >
-                          <option value="require">Ask first</option>
-                        </select>
-                      </label>
-                      {!repoLocked && (
-                        <label className="text-xs text-muted-foreground">
-                          Repo
-                          <input
-                            data-testid="invoker-terminal-repo"
-                            list="invoker-terminal-repo-suggestions"
-                            value={repoValue}
-                            disabled={readOnly || binding}
-                            placeholder="path or URL (default if empty)"
-                            onChange={(event) => onRepoInputChange?.(event.target.value)}
-                            onBlur={() => onRepoCommit?.()}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter') {
-                                event.preventDefault();
-                                onRepoCommit?.();
-                              }
-                            }}
-                            className="ml-2 w-56 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground outline-none hover:border-border-strong focus:border-ring"
-                          />
-                          <datalist id="invoker-terminal-repo-suggestions">
-                            {repoSuggestions.map((repo) => <option key={repo} value={repo} />)}
-                          </datalist>
-                        </label>
-                      )}
-                      {repoError && !repoLocked && (
-                        <span data-testid="invoker-terminal-repo-error" className="text-xs text-red-400">{repoError}</span>
-                      )}
-                      {!hasPlanningTools && (
-                        <p
-                          data-testid="invoker-terminal-planning-tools-empty"
-                          className="basis-full text-xs text-muted-foreground"
-                        >
-                          {PLANNING_TOOLS_EMPTY_PATH_MESSAGE}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-                {busy && !binding ? (
-                  <button
-                    type="button"
-                    aria-label="Cancel"
-                    data-testid="invoker-terminal-cancel"
-                    onClick={() => onCancelTurn?.()}
-                    className="inline-flex h-8 shrink-0 items-center justify-center rounded-sm border border-border bg-secondary px-2.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  >
-                    Cancel
-                  </button>
-                ) : (
-                  <button
-                    type="submit"
-                    aria-label="Send"
-                    disabled={sendButtonDisabled}
-                    className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm bg-amber-400 text-white shadow-sm transition-colors hover:bg-amber-300 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-300 disabled:bg-gray-700 disabled:text-gray-400 disabled:shadow-none disabled:hover:bg-gray-700 disabled:opacity-50 ${sendButtonDisabledCursorClass}`}
-                  >
-                    {binding ? (
-                      <span
-                        data-testid="invoker-terminal-send-spinner"
-                        aria-hidden="true"
-                        className="inline-block h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-gray-500 border-t-gray-100"
-                      />
-                    ) : (
-                      <SendIcon
-                        data-testid="invoker-terminal-send-icon"
-                        className="h-4 w-4"
-                      />
-                    )}
-                  </button>
-                )}
-              </div>
-            </div>
-          </form>
+          <PlanningChatComposer
+            inputRef={inputRef}
+            value={value}
+            busy={busy}
+            binding={binding}
+            readOnly={readOnly}
+            readOnlyReason={readOnlyReason}
+            followUp={Boolean(submittedPlanName) && !readOnly}
+            repositoryLocked={repositoryLocked}
+            expanded={expanded}
+            disabledCursorClass={composerDisabledCursorClass}
+            onValueChange={handleValueChange}
+            onInputKeyDown={handleInputKeyDown}
+            onFormSubmit={handleFormSubmit}
+            repoBound={repoBound}
+            repoEditing={repoEditing}
+            repoValue={repoValue}
+            repoSuggestions={repoSuggestions}
+            baseBranchValue={baseBranchValue}
+            repoMissing={repoMissing}
+            repoNotice={repoNotice ?? null}
+            repoError={repoError ?? null}
+            onRepoInputChange={onRepoInputChange}
+            onBaseBranchInputChange={onBaseBranchInputChange}
+            onRepoCommit={onRepoCommit}
+            onRepoEdit={onRepoEdit}
+            harnessChoices={harnessChoices}
+            selectedHarnessValue={selectedHarnessValue}
+            hasPlanningTools={hasPlanningTools}
+            onHarnessChange={handleHarnessChange}
+            selectedConfirmationMode={selectedConfirmationMode}
+            onConfirmationModeChange={onConfirmationModeChange}
+            showModelSelect={showModelSelect}
+            modelOptions={modelSelectOptions.map((option) => ({
+              key: option.key,
+              label: formatPlanningModelOptionLabel(option),
+              section: option.section,
+            }))}
+            selectedModelPresetKey={selectedModelPresetKey}
+            onPresetChange={onPresetChange}
+            planningPresetsLoading={planningPresetsLoading}
+            cursorDiscoveryWarning={cursorDiscoveryWarning}
+            emptyToolsMessage={PLANNING_TOOLS_EMPTY_PATH_MESSAGE}
+            sendDisabled={sendButtonDisabled}
+            sendDisabledCursorClass={sendButtonDisabledCursorClass}
+            onCancelTurn={onCancelTurn}
+          />
       </div>
+      {binding ? <RepoValidationCover /> : null}
     </section>
   );
 }

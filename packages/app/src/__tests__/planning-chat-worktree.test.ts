@@ -122,6 +122,7 @@ describe('provisionPlanningWorktree', () => {
       'invoker/planning/session-1',
       'resolved-head-sha',
       'session-1',
+      { reclaimIdlePlanningWorktrees: true },
     );
     expect(result).toEqual({
       worktreePath: '/nonexistent/planning-worktree-path-for-test',
@@ -237,6 +238,7 @@ describe('ensurePlanningWorktreeReady', () => {
       'invoker/planning/session-1',
       'stored-base-commit',
       'session-1',
+      { reclaimIdlePlanningWorktrees: true },
     );
     expect(result).toEqual({ worktreePath: missingPath, recreated: true });
     expect(spies.softRelease).toHaveBeenCalledTimes(1);

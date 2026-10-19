@@ -47,8 +47,32 @@ function hasKnownMergeGatePrefix(description: string): boolean {
   return MERGE_GATE_DESCRIPTION_PREFIXES.some(({ prefix }) => lower.startsWith(prefix.toLowerCase()));
 }
 
+const PUBLISHED_GITHUB_MERGE_NOTICE =
+  'This pull request is already open on GitHub. Merge it there. This screen does not merge it. Invoker marks the plan done after it sees that merge.';
+
+const UNPUBLISHED_GITHUB_MERGE_NOTICE =
+  'This plan finishes on GitHub, not from this screen. Merge the pull request there. Invoker marks the plan done after it sees that merge.';
+
+interface MergeGateFinish {
+  onFinish?: string;
+  mergeMode?: string;
+}
+
 function shouldUseExternalReviewHeading(task: TaskState, mergeMode?: string): boolean {
   return mergeMode === 'external_review' || Boolean(task.execution?.reviewUrl);
+}
+
+/** True when Approve would not merge: the pull request is finished on GitHub, or review is external. */
+export function mergeGateLeavesMergeToGitHub(task: TaskState, workflow?: MergeGateFinish): boolean {
+  if (!task.config.isMergeNode) return false;
+  if (task.execution.pendingFixError) return false;
+  if (workflow?.mergeMode === 'external_review') return true;
+  return workflow?.onFinish === 'pull_request';
+}
+
+export function githubMergeNotice(reviewUrl?: string): string {
+  if (reviewUrl) return PUBLISHED_GITHUB_MERGE_NOTICE;
+  return UNPUBLISHED_GITHUB_MERGE_NOTICE;
 }
 
 /**

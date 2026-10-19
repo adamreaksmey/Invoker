@@ -159,6 +159,7 @@ describe('Task interaction (component)', () => {
     await screen.findByTestId('selected-workflow-mini-dag');
     fireEvent.click(await screen.findByTestId('rf__node-task-worker-action'));
 
+    fireEvent.click(await screen.findByTestId('task-logs-toggle'));
     await waitFor(() => {
       expect(screen.getByTestId('task-logs-section')).toHaveTextContent(
         'pr-summary-refresh/refresh-pr-summary completed: Updated PR body with Invoker pipeline summary',
@@ -368,6 +369,26 @@ describe('Task interaction (component)', () => {
     fireEvent(handle, new MouseEvent('pointerup', { bubbles: true, clientX: 1200, clientY: 900 }));
 
     expect(panel).toHaveStyle({ left: '468px', top: '308px' });
+  });
+
+  it('expands the selected workflow mini DAG from its header', async () => {
+    window.localStorage.removeItem('invoker.floating-task-dag-size');
+    render(<App />);
+    fireEvent.click(await screen.findByTestId('sidebar-planning'));
+    act(() => mock.setTasks([alpha, beta], workflows));
+
+    fireEvent.click(await screen.findByTestId('workflow-node-wf-a'));
+    const panel = await screen.findByTestId('selected-workflow-mini-dag');
+    const resize = screen.getByTestId('floating-graph-panel-size');
+
+    expect(panel.className).toContain('h-[210px]');
+    expect(resize).toHaveTextContent('Larger');
+
+    fireEvent.pointerDown(resize);
+    expect(panel.className).toContain('h-[420px]');
+    expect(panel.className).toContain('w-[640px]');
+    expect(resize).toHaveTextContent('Smaller');
+    expect(screen.getByTestId('selected-workflow-mini-dag')).toBeInTheDocument();
   });
 
   it('opens and closes the maximized graph without clearing selection', async () => {
