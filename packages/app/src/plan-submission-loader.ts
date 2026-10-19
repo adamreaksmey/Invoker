@@ -1,5 +1,5 @@
 import type { InAppPlanningRepoBinding, Logger } from '@invoker/contracts';
-import { PINNED_WORKFLOW_BASE_BRANCH, type PlanDefinition } from '@invoker/workflow-core';
+import type { PlanDefinition } from '@invoker/workflow-core';
 import {
   registerBuiltinAgents,
   assertPlanExecutionAgentsRegistered,
@@ -72,8 +72,9 @@ export async function loadPlanSubmissionBundle(
     if (options?.submittedBy === 'worker') {
       plan = applyWorkerSubmittedTaskPriorityDefault(plan);
     }
-    if (!submission.isStack) {
-      plan = { ...plan, baseBranch: PINNED_WORKFLOW_BASE_BRANCH };
+    const boundBaseBranch = options?.repositoryBinding?.baseBranch?.trim();
+    if (boundBaseBranch) {
+      plan = { ...plan, baseBranch: boundBaseBranch };
     }
     if (upstream) {
       plan = {

@@ -114,7 +114,7 @@ tasks:
     expect(deps.persistence.listWorkflows()[0]?.staged).toBe(true);
   });
 
-  it('pins a single submitted workflow base branch to master', async () => {
+  it('preserves an explicit single-workflow baseBranch on submit', async () => {
     const { deps, loadedPlans } = makeDeps();
 
     await loadPlanSubmissionBundle(`
@@ -122,6 +122,46 @@ name: Single Review Workflow
 repoUrl: git@github.com:test/repo.git
 baseBranch: release
 featureBranch: plan/single-review-workflow
+tasks:
+  - id: build
+    description: Build it
+    command: echo ok
+`, deps);
+
+    expect(loadedPlans).toHaveLength(1);
+    expect(loadedPlans[0]?.baseBranch).toBe('release');
+  });
+
+  it('prefers the planning repositoryBinding baseBranch over the plan YAML', async () => {
+    const { deps, loadedPlans } = makeDeps();
+
+    await loadPlanSubmissionBundle(`
+name: Bound Base Workflow
+repoUrl: git@github.com:test/repo.git
+baseBranch: release
+featureBranch: plan/bound-base
+tasks:
+  - id: build
+    description: Build it
+    command: echo ok
+`, deps, {
+      repositoryBinding: {
+        repoUrl: 'git@github.com:test/repo.git',
+        baseBranch: 'main',
+      },
+    });
+
+    expect(loadedPlans).toHaveLength(1);
+    expect(loadedPlans[0]?.baseBranch).toBe('main');
+  });
+
+  it('defaults a missing single-workflow baseBranch to master', async () => {
+    const { deps, loadedPlans } = makeDeps();
+
+    await loadPlanSubmissionBundle(`
+name: Default Base Workflow
+repoUrl: git@github.com:test/repo.git
+featureBranch: plan/default-base
 tasks:
   - id: build
     description: Build it
