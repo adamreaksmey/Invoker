@@ -1355,6 +1355,34 @@ describe('Orchestrator', () => {
       expect(() => orchestrator.deleteTask(onlyId)).toThrow(/last task/);
       expect(orchestrator.getTask(onlyId)).toBeDefined();
     });
+
+    it('reconciles merge deps when deleting a leaf task so sync does not brick', () => {
+      orchestrator.loadPlan({
+        name: 'task-delete-leaf-merge',
+        tasks: [
+          { id: 'set-global-font-size', description: 'Normalize typography' },
+          {
+            id: 'scrub-handoff-texts',
+            description: 'Scrub handoff texts',
+            dependencies: ['set-global-font-size'],
+          },
+        ],
+      });
+      const wfId = orchestrator.getWorkflowIds()[0]!;
+      const mergeId = `__merge__${wfId}`;
+      const upstreamId = sid(orchestrator, 0, 'set-global-font-size');
+      const leafId = sid(orchestrator, 0, 'scrub-handoff-texts');
+
+      expect(orchestrator.getTask(mergeId)?.dependencies).toEqual([leafId]);
+
+      expect(() => orchestrator.deleteTask(leafId)).not.toThrow();
+
+      expect(orchestrator.getTask(leafId)).toBeUndefined();
+      expect(persistence.getTaskEntry(leafId)).toBeUndefined();
+      expect(persistence.getTaskEntry(mergeId)!.task.dependencies).toEqual([upstreamId]);
+      expect(orchestrator.getTask(mergeId)?.dependencies).toEqual([upstreamId]);
+      expect(() => orchestrator.syncAllFromDb()).not.toThrow();
+    });
   });
 
   describe('deleteWorkflow', () => {
@@ -2102,7 +2130,7 @@ describe('Orchestrator', () => {
   });
 
   describe('blocked task unblocking', () => {
-    it('throws when a persisted merge node has detached dependencies', () => {
+    it('heals a persisted merge node with detached dependencies on sync', () => {
       orchestrator.loadPlan({
         name: 'merge-repair-test',
         tasks: [
@@ -2113,17 +2141,17 @@ describe('Orchestrator', () => {
 
       const wfId = orchestrator.getWorkflowIds()[0]!;
       const mergeId = `__merge__${wfId}`;
+      const leafId = sid(orchestrator, 0, 'task-b');
 
       persistence.updateTask(mergeId, {
         status: 'review_ready',
         dependencies: ['missing-detached-leaf'],
       });
 
-      expect(() => orchestrator.syncAllFromDb()).toThrow(
-        `Merge gate invariant violated for workflow ${wfId}: merge node ${mergeId} has detached dependencies.`,
-      );
-      expect(persistence.getTaskEntry(mergeId)!.task.dependencies).toEqual(['missing-detached-leaf']);
-      expect(persistence.getTaskEntry(mergeId)!.task.status).toBe('review_ready');
+      expect(() => orchestrator.syncAllFromDb()).not.toThrow();
+      expect(persistence.getTaskEntry(mergeId)!.task.dependencies).toEqual([leafId]);
+      expect(persistence.getTaskEntry(mergeId)!.task.status).toBe('pending');
+      expect(orchestrator.getTask(mergeId)?.dependencies).toEqual([leafId]);
     });
 
     it('throws when a persisted merge experiment is detached from its parent merge node', () => {

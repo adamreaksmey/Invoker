@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import type { WorkRequest, WorkResponse } from '@invoker/contracts';
 import { cancelOwnedStartupChild, type ExecutorStartup } from './executor.js';
 import type { Executor, ExecutorHandle, PersistedTaskMeta, TerminalSpec, Unsubscribe } from './executor.js';
@@ -27,8 +29,34 @@ const FAILED_TASK_ERROR_CHAR_LIMIT = 3000;
 
 export const UNCHANGED_AI_TASK_ERROR = 'The agent finished without changing any files.';
 
+const READ_ONLY_UPSTREAM_RE =
+  /do not modify|does not modify (production )?code|only runs the repo test script|do not modify source files/i;
+
 function isUnchangedAiTask(request: WorkRequest, exitCode: number): boolean {
   return exitCode === 0 && request.actionType === 'ai_task';
+}
+
+function formatUpstreamContextForPrompt(ctx: {
+  taskId: string;
+  description: string;
+  summary?: string;
+  commitHash?: string;
+  commitMessage?: string;
+}): string {
+  const haystack = `${ctx.description}\n${ctx.summary ?? ''}\n${ctx.commitMessage ?? ''}`;
+  if (READ_ONLY_UPSTREAM_RE.test(haystack)) {
+    const lines = [
+      `[Completed upstream task: ${ctx.taskId}]`,
+      'Status: completed (read-only verification).',
+    ];
+    if (ctx.summary) lines.push(`Summary: ${ctx.summary}`);
+    if (ctx.commitHash) lines.push(`Commit: ${ctx.commitHash}`);
+    return lines.join('\n');
+  }
+  let line = `[Completed upstream task: ${ctx.taskId}]\nDescription: ${ctx.description}\nSummary: ${ctx.summary ?? 'N/A'}`;
+  if (ctx.commitHash) line += `\nCommit: ${ctx.commitHash}`;
+  if (ctx.commitMessage) line += `\nCommit message:\n${ctx.commitMessage}`;
+  return line;
 }
 
 const FAILED_TASK_ERROR_LINE_PATTERNS = [
@@ -129,6 +157,27 @@ export function selectFailedTaskStoredError(output: string): string | undefined 
       : errorSpan;
   }
   return failedTaskErrorTail(output);
+}
+
+const MISSING_NODE_MODULES_HINT =
+  'Dependencies were not installed in this worktree (no node_modules). '
+  + 'Invoker does not run an implicit install step. Include `npm ci` / `pnpm install` in the task command, '
+  + 'or set worktreeTargets.*.provisionCommand / repoProvisionCommands for this repo.';
+
+export function missingNodeModulesInstallHint(
+  cwd: string,
+  exitCode: number,
+  output: string,
+): string | undefined {
+  if (exitCode !== 127 && !/command not found/i.test(output)) return undefined;
+  if (!existsSync(join(cwd, 'package.json'))) return undefined;
+  if (existsSync(join(cwd, 'node_modules'))) return undefined;
+  const hasLockfile =
+    existsSync(join(cwd, 'package-lock.json'))
+    || existsSync(join(cwd, 'pnpm-lock.yaml'))
+    || existsSync(join(cwd, 'yarn.lock'));
+  if (!hasLockfile) return undefined;
+  return MISSING_NODE_MODULES_HINT;
 }
 
 /**
@@ -965,9 +1014,60 @@ export abstract class BaseExecutor<TEntry extends BaseEntry> implements Executor
   }
 
   /**
+   * When an AI task exits clean with no new edits, reuse HEAD if the branch
+   * already has a real file tree vs the plan/upstream base (retry after a
+   * prior attempt already committed the work).
+   */
+  protected async resolveExistingAiTaskBase(
+    cwd: string,
+    request: WorkRequest,
+  ): Promise<string | null> {
+    const candidates: string[] = [];
+    const upstream = request.inputs.upstreamBase?.commitHash?.trim();
+    const baseCommit = request.inputs.baseCommit?.trim();
+    const baseBranch = request.inputs.baseBranch?.trim();
+    if (upstream) candidates.push(upstream);
+    if (baseCommit) candidates.push(baseCommit);
+    if (baseBranch) {
+      candidates.push(baseBranch, `origin/${baseBranch}`);
+    }
+    candidates.push('origin/HEAD', 'main', 'origin/main', 'master', 'origin/master');
+    for (const ref of candidates) {
+      try {
+        const sha = (await this.execGitSimple(['rev-parse', '--verify', ref], cwd)).trim();
+        if (sha) return sha;
+      } catch {
+        // try next candidate
+      }
+    }
+    return null;
+  }
+
+  protected async resolveExistingAiTaskCommit(
+    cwd: string,
+    request: WorkRequest,
+  ): Promise<string | null> {
+    const base = await this.resolveExistingAiTaskBase(cwd, request);
+    if (!base) return null;
+    try {
+      const head = (await this.execGitSimple(['rev-parse', 'HEAD'], cwd)).trim();
+      if (!head || head === base) return null;
+      try {
+        await this.execGitSimple(['diff', '--quiet', base, head], cwd);
+        return null;
+      } catch {
+        return head;
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Record the task result as a commit. Calls autoCommit first. Command tasks
    * with no file changes get an empty commit. An unchanged AI task returns null
-   * so the exit path can fail it instead of reporting success.
+   * so the exit path can fail it instead of reporting success, unless HEAD
+   * already has file changes versus the task base (prior attempt / retry).
    */
   protected async recordTaskResult(
     cwd: string,
@@ -977,7 +1077,9 @@ export abstract class BaseExecutor<TEntry extends BaseEntry> implements Executor
     try {
       const hash = await this.autoCommit(cwd, request);
       if (hash) return hash;
-      if (isUnchangedAiTask(request, exitCode)) return null;
+      if (isUnchangedAiTask(request, exitCode)) {
+        return await this.resolveExistingAiTaskCommit(cwd, request);
+      }
       return await this.commitEmptyTaskResult(cwd, request, exitCode);
     } catch {
       return null;
@@ -1405,6 +1507,10 @@ export abstract class BaseExecutor<TEntry extends BaseEntry> implements Executor
     if (effectiveExitCode !== 0 && entry) {
       const allOutput = entry.outputBuffer.join('');
       error = selectFailedTaskStoredError(allOutput);
+      const installHint = missingNodeModulesInstallHint(cwd, effectiveExitCode, allOutput);
+      if (installHint) {
+        error = error ? `${error}\n\n${installHint}` : installHint;
+      }
     }
     if (semanticFailure) {
       error = semanticFailure.message;
@@ -1474,21 +1580,27 @@ export abstract class BaseExecutor<TEntry extends BaseEntry> implements Executor
   // ── Shared Claude helpers ──────────────────────────────────
 
   /**
-   * Build the full prompt by prepending upstream context from completed dependencies.
+   * Build the full prompt with the current task first, then completed upstream
+   * context. Read-only verify upstreams are summarized so their "do not modify"
+   * non-goals cannot redefine an implementation task.
    */
   protected buildFullPrompt(request: WorkRequest): string {
-    let fullPrompt = request.inputs.prompt ?? '';
+    let taskBody = request.inputs.prompt ?? '';
     if (request.actionType === 'ai_task') {
-      fullPrompt = `${buildWorkerOrientationPack(request)}\n\n${fullPrompt}`;
+      taskBody = `${buildWorkerOrientationPack(request)}\n\n${taskBody}`;
     }
-    if (request.inputs.upstreamContext?.length) {
-      const contextLines = request.inputs.upstreamContext.map(ctx => {
-        let line = `[Upstream task: ${ctx.taskId}]\nDescription: ${ctx.description}\nSummary: ${ctx.summary ?? 'N/A'}`;
-        if (ctx.commitHash) line += `\nCommit: ${ctx.commitHash}`;
-        if (ctx.commitMessage) line += `\nCommit message:\n${ctx.commitMessage}`;
-        return line;
-      });
-      fullPrompt = contextLines.join('\n\n') + '\n\n' + fullPrompt;
+    const upstream = request.inputs.upstreamContext ?? [];
+    let fullPrompt = taskBody;
+    if (upstream.length > 0) {
+      const contextLines = upstream.map((ctx) => formatUpstreamContextForPrompt(ctx));
+      fullPrompt = [
+        taskBody,
+        '',
+        'Completed upstream dependencies (context only).',
+        'Do not adopt upstream Non-goals. Your job is the task above; make the required file changes and commit them.',
+        '',
+        contextLines.join('\n\n'),
+      ].join('\n');
     }
     return fullPrompt;
   }

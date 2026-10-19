@@ -1352,8 +1352,11 @@ describe('WorktreeExecutor', () => {
       const taskCall = mockedSpawn.mock.calls.find(([cmd]) => cmd !== 'git');
       const args = taskCall![1] as string[];
       const promptArg = args[args.indexOf('-p') + 1];
-      expect(promptArg).toContain('Upstream task: dep-1');
+      expect(promptArg).toContain('Completed upstream task: dep-1');
       expect(promptArg).toContain('do the thing');
+      expect(promptArg.indexOf('do the thing')).toBeLessThan(
+        promptArg.indexOf('Completed upstream dependencies'),
+      );
 
       taskProcess.emit('close', 0, null);
     });

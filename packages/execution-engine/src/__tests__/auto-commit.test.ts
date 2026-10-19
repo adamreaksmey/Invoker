@@ -2357,6 +2357,7 @@ describe('BaseExecutor.handleProcessExit push semantics', () => {
     const req = makeRequest('task-unchanged', {
       description: 'Change the font',
       prompt: 'Set the font to Times New Roman',
+      baseCommit: before,
     });
     const entry = executor.registerTestEntry('e-unchanged-ai', req);
     let response: WorkResponse | undefined;
@@ -2369,6 +2370,84 @@ describe('BaseExecutor.handleProcessExit push semantics', () => {
     expect(response?.status).toBe('failed');
     expect(response?.outputs.error).toBe(UNCHANGED_AI_TASK_ERROR);
     expect(execSync('git rev-parse HEAD', { cwd: cloneDir }).toString().trim()).toBe(before);
+  });
+
+  it('completes an unchanged ai task when HEAD already has file changes vs base', async () => {
+    const base = execSync('git rev-parse HEAD', { cwd: cloneDir }).toString().trim();
+    execSync('git checkout -b invoker/retry-already-done', { cwd: cloneDir });
+    writeFileSync(join(cloneDir, 'engine.ts'), 'export const win = true;\n');
+    execSync('git add engine.ts', { cwd: cloneDir });
+    execSync('git commit -m "Add pure tic-tac-toe engine and tests"', { cwd: cloneDir });
+    const prior = execSync('git rev-parse HEAD', { cwd: cloneDir }).toString().trim();
+
+    const req = makeRequest('task-already-done', {
+      description: 'Implement engine',
+      prompt: 'Add the engine and tests',
+      baseCommit: base,
+    });
+    const entry = executor.registerTestEntry('e-already-done', req);
+    let response: WorkResponse | undefined;
+    entry.completeListeners.add((next) => { response = next; });
+
+    await executor.testHandleProcessExit('e-already-done', req, cloneDir, 0, {
+      branch: 'invoker/retry-already-done',
+    });
+
+    expect(response?.status).toBe('completed');
+    expect(response?.outputs.exitCode).toBe(0);
+    expect(response?.outputs.error).toBeUndefined();
+    expect(response?.outputs.commitHash).toBe(prior);
+    expect(execSync('git rev-parse HEAD', { cwd: cloneDir }).toString().trim()).toBe(prior);
+  });
+
+  it('completes an unchanged ai task using baseBranch when baseCommit is missing', async () => {
+    const defaultBranch = execSync('git branch --show-current', { cwd: cloneDir }).toString().trim();
+    execSync('git checkout -b invoker/retry-via-base-branch', { cwd: cloneDir });
+    writeFileSync(join(cloneDir, 'board.ts'), 'export const board = [];\n');
+    execSync('git add board.ts', { cwd: cloneDir });
+    execSync('git commit -m "Add board"', { cwd: cloneDir });
+    const prior = execSync('git rev-parse HEAD', { cwd: cloneDir }).toString().trim();
+
+    const req = makeRequest('task-base-branch-only', {
+      description: 'Implement board',
+      prompt: 'Add the board',
+      baseBranch: defaultBranch,
+    });
+    const entry = executor.registerTestEntry('e-base-branch-only', req);
+    let response: WorkResponse | undefined;
+    entry.completeListeners.add((next) => { response = next; });
+
+    await executor.testHandleProcessExit('e-base-branch-only', req, cloneDir, 0, {
+      branch: 'invoker/retry-via-base-branch',
+    });
+
+    expect(response?.status).toBe('completed');
+    expect(response?.outputs.commitHash).toBe(prior);
+  });
+
+  it('completes an unchanged ai task when workflow baseBranch is wrong but main exists', async () => {
+    execSync('git branch -M main', { cwd: cloneDir });
+    execSync('git checkout -b invoker/retry-wrong-base-branch', { cwd: cloneDir });
+    writeFileSync(join(cloneDir, 'engine.ts'), 'export const ok = true;\n');
+    execSync('git add engine.ts', { cwd: cloneDir });
+    execSync('git commit -m "Add engine"', { cwd: cloneDir });
+    const prior = execSync('git rev-parse HEAD', { cwd: cloneDir }).toString().trim();
+
+    const req = makeRequest('task-wrong-base-branch', {
+      description: 'Implement engine',
+      prompt: 'Add the engine',
+      baseBranch: 'master',
+    });
+    const entry = executor.registerTestEntry('e-wrong-base-branch', req);
+    let response: WorkResponse | undefined;
+    entry.completeListeners.add((next) => { response = next; });
+
+    await executor.testHandleProcessExit('e-wrong-base-branch', req, cloneDir, 0, {
+      branch: 'invoker/retry-wrong-base-branch',
+    });
+
+    expect(response?.status).toBe('completed');
+    expect(response?.outputs.commitHash).toBe(prior);
   });
 
   it('does not force semantic failure for non-codex agents', async () => {

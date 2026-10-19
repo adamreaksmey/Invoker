@@ -145,6 +145,34 @@ describe('worker orientation pack prompts', () => {
     expect(prompt).not.toContain('git rev-parse HEAD');
   });
 
+  it('puts the current task before upstream and scrubs read-only verify non-goals', () => {
+    const taskGoal = 'Goal: Build a responsive, accessible same-device board UI wired to the engine.';
+    const request = makeAiTaskRequest(taskGoal);
+    request.inputs.upstreamContext = [
+      {
+        taskId: 'wf/verify-engine-tests',
+        description:
+          'Safety invariant: This command only runs the repo test script; it does not modify production code.\n'
+          + 'Non-goals: Do not modify source files during verification.',
+        summary: 'npm test passed',
+        commitHash: 'abc1234',
+        commitMessage: 'invoker: verify — Do not modify source files during verification.',
+      },
+    ];
+
+    const prompt = new PromptProbeExecutor().promptFor(request);
+    const taskAt = prompt.indexOf(taskGoal);
+    const upstreamAt = prompt.indexOf('Completed upstream dependencies');
+    expect(taskAt).toBeGreaterThanOrEqual(0);
+    expect(upstreamAt).toBeGreaterThan(taskAt);
+    expect(prompt).toContain('Do not adopt upstream Non-goals');
+    expect(prompt).toContain('[Completed upstream task: wf/verify-engine-tests]');
+    expect(prompt).toContain('Status: completed (read-only verification).');
+    expect(prompt).not.toMatch(/Do not modify source files during verification/i);
+    expect(prompt).toContain('Summary: npm test passed');
+    expect(prompt).toContain('Commit: abc1234');
+  });
+
   it('still scopes a repair task to a package named before the job log tail', () => {
     const prompt = new PromptProbeExecutor().promptFor(makeRepairTaskRequest([
       "This PR's CI check is failing. Diagnose why it is failing, then fix it.",

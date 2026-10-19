@@ -4,9 +4,13 @@ import { describe, expect, it, beforeEach, vi } from 'vitest';
 import type { WorkRequest, WorkResponse } from '@invoker/contracts';
 import {
   BaseExecutor,
+  missingNodeModulesInstallHint,
   selectFailedTaskStoredError,
   type BaseEntry,
 } from '../base-executor.js';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { SshExecutor } from '../ssh-executor.js';
 import type { ExecutorHandle, TerminalSpec } from '../executor.js';
 
@@ -164,5 +168,37 @@ describe('failed task stored error selection', () => {
 
     expect(localResponse.outputs.error).toBe(sshResponse.outputs.error);
     expect(localResponse.outputs.error).toBe(selectFailedTaskStoredError(output));
+  });
+
+  it('hints when exit 127 and lockfile exists without node_modules', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'missing-nm-'));
+    try {
+      writeFileSync(join(dir, 'package.json'), '{"name":"x"}\n');
+      writeFileSync(join(dir, 'package-lock.json'), '{}\n');
+      const hint = missingNodeModulesInstallHint(
+        dir,
+        127,
+        'sh: vite: command not found\n',
+      );
+      expect(hint).toContain('no node_modules');
+      expect(hint).toContain('npm ci');
+      expect(hint).toContain('provisionCommand');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not hint when node_modules already exists', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'has-nm-'));
+    try {
+      writeFileSync(join(dir, 'package.json'), '{"name":"x"}\n');
+      writeFileSync(join(dir, 'package-lock.json'), '{}\n');
+      mkdirSync(join(dir, 'node_modules'));
+      expect(
+        missingNodeModulesInstallHint(dir, 127, 'sh: vite: command not found\n'),
+      ).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
