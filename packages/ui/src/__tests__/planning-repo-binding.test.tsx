@@ -358,6 +358,16 @@ describe('planning composer repo binding', () => {
     expect(screen.getByTestId('invoker-terminal-repo-check')).toBeInTheDocument();
   });
 
+  it('keeps Options non-interactive when there is nothing to expand', async () => {
+    render(<App />);
+    await openComposerOptions();
+
+    const options = screen.getByTestId('invoker-terminal-options');
+    expect(options).toBeDisabled();
+    expect(options).toHaveClass('cursor-default');
+    expect(options).not.toHaveAttribute('aria-expanded');
+  });
+
   it('does not send a planning message until a repository is entered', async () => {
     render(<App />);
     await openComposerOptions();

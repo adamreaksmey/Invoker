@@ -1,4 +1,4 @@
-import { useState, type ChangeEvent, type FormEvent, type JSX, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { useEffect, useState, type ChangeEvent, type FormEvent, type JSX, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { PlanningConfirmationMode } from '@invoker/contracts';
 import { PLANNING_CLONE_IN_PROGRESS } from '@invoker/contracts/planning-clone-status';
 import { ArrowUpIcon, ChevronDownIcon, GitBranchIcon, OptionsIcon, RepositoryIcon } from './icons/index.js';
@@ -383,13 +383,27 @@ function ReviewMenu({ composer }: { composer: PlanningChatComposerProps }): JSX.
   );
 }
 
-function OptionsButton({ open, onToggle }: { open: boolean; onToggle: () => void }): JSX.Element {
+function OptionsButton({
+  open,
+  onToggle,
+  interactive,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  interactive: boolean;
+}): JSX.Element {
+  const className = interactive
+    ? 'inline-flex h-8 shrink-0 cursor-pointer items-center gap-1 rounded-lg px-1.5 text-xs text-muted-foreground hover:text-foreground'
+    : 'inline-flex h-8 shrink-0 cursor-default items-center gap-1 rounded-lg px-1.5 text-xs text-muted-foreground';
   return (
     <button
       type="button"
-      aria-expanded={open}
-      onClick={onToggle}
-      className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg px-1.5 text-xs text-muted-foreground hover:text-foreground"
+      data-testid="invoker-terminal-options"
+      aria-expanded={interactive ? open : undefined}
+      aria-disabled={interactive ? undefined : true}
+      disabled={!interactive}
+      onClick={interactive ? onToggle : undefined}
+      className={className}
     >
       <OptionsIcon className="h-3.5 w-3.5" />
       Options
@@ -539,13 +553,18 @@ function ComposerToolbar({
   optionsOpen: boolean;
   onToggleOptions: () => void;
 }): JSX.Element {
+  const optionsInteractive = composerHasExtraOptions(composer);
   return (
     <div className="flex items-center gap-1.5">
       <div className="flex min-w-0 flex-1 items-center gap-1">
         <HarnessMenu composer={composer} />
         <ReviewMenu composer={composer} />
         <ModelMenu composer={composer} />
-        <OptionsButton open={optionsOpen} onToggle={onToggleOptions} />
+        <OptionsButton
+          open={optionsOpen}
+          onToggle={onToggleOptions}
+          interactive={optionsInteractive}
+        />
       </div>
       <ComposerSendControl composer={composer} />
     </div>
@@ -575,7 +594,12 @@ function ComposerCard({
 
 export function PlanningChatComposer(props: PlanningChatComposerProps): JSX.Element {
   const [optionsOpen, setOptionsOpen] = useState(false);
+  const optionsInteractive = composerHasExtraOptions(props);
+  useEffect(() => {
+    if (!optionsInteractive) setOptionsOpen(false);
+  }, [optionsInteractive]);
   const toggleOptions = (): void => {
+    if (!optionsInteractive) return;
     setOptionsOpen((open) => !open);
   };
   return (
