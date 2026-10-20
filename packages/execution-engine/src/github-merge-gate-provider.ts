@@ -12,7 +12,8 @@ import type {
   MergeGateFailedCheck,
 } from './merge-gate-provider.js';
 import { RESTART_TO_BRANCH_TRACE } from './exec-trace.js';
-import { isGitRefLockRace, retryTransientGitHubCli } from './git-utils.js';
+import { ensureRemoteUrl } from './git-config-mutation.js';
+import { isGitRefLockRace, pushGitWithGitHubRecovery, retryTransientGitHubCli } from './git-utils.js';
 
 type ExistingPullRequest = { url: string; number: number };
 
@@ -307,17 +308,31 @@ export class GitHubMergeGateProvider implements MergeGateProvider {
 
   private async pushFeatureBranch(cwd: string, featureBranch: string): Promise<void> {
     const pushArgs = ['push', '--force', 'origin', `${featureBranch}:refs/heads/${featureBranch}`];
-    try {
-      await this.exec('git', pushArgs, cwd);
-    } catch (err) {
-      if (!isGitRefLockRace(err)) throw err;
-      await this.exec('git', [
-        'fetch',
-        'origin',
-        `+refs/heads/${featureBranch}:refs/remotes/origin/${featureBranch}`,
-      ], cwd);
-      await this.exec('git', pushArgs, cwd);
-    }
+    const runPush = async (): Promise<void> => {
+      try {
+        await this.exec('git', pushArgs, cwd);
+      } catch (err) {
+        if (!isGitRefLockRace(err)) throw err;
+        await this.exec('git', [
+          'fetch',
+          'origin',
+          `+refs/heads/${featureBranch}:refs/remotes/origin/${featureBranch}`,
+        ], cwd);
+        await this.exec('git', pushArgs, cwd);
+      }
+    };
+    await pushGitWithGitHubRecovery(runPush, {
+      remoteName: 'origin',
+      getRemoteUrl: async () => this.exec('git', ['remote', 'get-url', 'origin'], cwd),
+      setRemoteUrl: async (url) => {
+        await ensureRemoteUrl({
+          cwd,
+          remote: 'origin',
+          url,
+          context: { caller: 'GitHubMergeGateProvider.pushFeatureBranch', detail: featureBranch },
+        });
+      },
+    });
   }
 
   private async findExistingOpenPullRequest(

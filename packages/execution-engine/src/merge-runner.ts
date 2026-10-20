@@ -25,7 +25,8 @@ import {
   type PrAuthoringContext,
   type PrAuthoringTaskEntry,
 } from './pr-authoring.js';
-import { isGitRefLockRace } from './git-utils.js';
+import { ensureRemoteUrl } from './git-config-mutation.js';
+import { isGitRefLockRace, pushGitWithGitHubRecovery } from './git-utils.js';
 type ReviewGateState = NonNullable<TaskState['execution']['reviewGate']>;
 type ReviewGateArtifact = ReviewGateState['artifacts'][number];
 
@@ -275,22 +276,38 @@ async function pushFeatureBranchWithRefLockRetry(
   featureBranch: string,
 ): Promise<void> {
   const pushArgs = ['push', '--force', 'origin', `${featureBranch}:refs/heads/${featureBranch}`];
-  try {
-    await execGitInMergeSafe(host, pushArgs, dir);
-  } catch (err) {
-    if (!isGitRefLockRace(err)) throw err;
-    mergeTrace('GIT_PUSH_REF_LOCK_RACE_RETRY', {
-      featureBranch,
-      dir,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    await execGitInMergeSafe(host, [
-      'fetch',
-      'origin',
-      `+refs/heads/${featureBranch}:refs/remotes/origin/${featureBranch}`,
-    ], dir);
-    await execGitInMergeSafe(host, pushArgs, dir);
-  }
+  const runPush = async (): Promise<void> => {
+    try {
+      await execGitInMergeSafe(host, pushArgs, dir);
+    } catch (err) {
+      if (!isGitRefLockRace(err)) throw err;
+      mergeTrace('GIT_PUSH_REF_LOCK_RACE_RETRY', {
+        featureBranch,
+        dir,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await execGitInMergeSafe(host, [
+        'fetch',
+        'origin',
+        `+refs/heads/${featureBranch}:refs/remotes/origin/${featureBranch}`,
+      ], dir);
+      await execGitInMergeSafe(host, pushArgs, dir);
+    }
+  };
+  await pushGitWithGitHubRecovery(runPush, {
+    remoteName: 'origin',
+    getRemoteUrl: async () => (
+      await execGitInMergeSafe(host, ['remote', 'get-url', 'origin'], dir)
+    ).trim(),
+    setRemoteUrl: async (url) => {
+      await ensureRemoteUrl({
+        cwd: dir,
+        remote: 'origin',
+        url,
+        context: { caller: 'merge-runner.pushFeatureBranchWithRefLockRetry', detail: featureBranch },
+      });
+    },
+  });
   await assertBranchRetrievableOnOrigin(host, dir, featureBranch);
 }
 

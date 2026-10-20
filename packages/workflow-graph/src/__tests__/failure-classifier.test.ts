@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { PR_6976_OAUTH_SESSION_EXPIRED_ERROR } from '../../../execution-engine/src/__tests__/fixtures/pr-6976-oauth-session-expired.js';
-import { FailureClassifier, SSH_INFRA_FAILURE_CLASSES } from '../failure-classifier.js';
+import { FailureClassifier, GIT_PUBLISH_FAILURE_CLASSES, SSH_INFRA_FAILURE_CLASSES } from '../failure-classifier.js';
 
 const GIT_REF_PATH_CONFLICT_ERROR =
   "fatal: cannot lock ref 'refs/heads/experiment/child': "
@@ -128,6 +128,55 @@ const MERGE_BRANCH_MISSING_ERROR =
   'Error: Branch "feature/local-llm-e2e" required by the merge/gate step was not found on the remote '
   + '(https://github.com/EdbertChan/fraud_repo.git). This branch is retrieved from origin, but it is not there';
 
+describe('FailureClassifier.classifyGitPublishError', () => {
+  it('classifies protected branch and repository rule rejections', () => {
+    expect(FailureClassifier.classifyGitPublishError(
+      'remote: error: GH006: Protected branch update failed for refs/heads/main.\n'
+      + 'remote: error: At least 1 approving review is required by reviewers in code owners.\n'
+      + 'To https://github.com/o/r.git\n'
+      + '! [remote rejected] main -> main (protected branch hook declined)',
+    )).toBe('git-publish-protected-branch');
+    expect(FailureClassifier.classifyGitPublishError(
+      'remote: error: GH013: Repository rule violations found for refs/heads/main.',
+    )).toBe('git-publish-protected-branch');
+    expect(FailureClassifier.classifyGitPublishError(
+      'remote: error: GH006: Protected branch update failed for refs/heads/main.',
+    )).toBe('git-publish-protected-branch');
+  });
+
+  it('classifies auth and permission failures', () => {
+    expect(FailureClassifier.classifyGitPublishError(
+      'remote: Permission to o/r.git denied to user.',
+    )).toBe('git-publish-auth');
+    expect(FailureClassifier.classifyGitPublishError(
+      "fatal: Authentication failed for 'https://github.com/o/r.git/'",
+    )).toBe('git-publish-auth');
+    expect(FailureClassifier.classifyGitPublishError(
+      'remote: Invalid username or token. Password authentication is not supported for Git operations.',
+    )).toBe('git-publish-auth');
+    expect(FailureClassifier.classifyGitPublishError(
+      "fatal: unable to access 'https://github.com/o/r.git/': The requested URL returned error: 403",
+    )).toBe('git-publish-auth');
+  });
+
+  it('classifies missing workflow OAuth scope', () => {
+    expect(FailureClassifier.classifyGitPublishError(
+      'remote: error: refusing to allow an OAuth App to create or update workflow '
+      + '`.github/workflows/ci.yml` without `workflow` scope',
+    )).toBe('git-publish-workflow-scope');
+    expect(FailureClassifier.classifyGitPublishError(
+      "remote: error: refusing to allow a Personal Access Token to create or update workflow "
+      + "`.github/workflows/ci.yml` without 'workflow' scope",
+    )).toBe('git-publish-workflow-scope');
+  });
+
+  it('wires git publish classes through classifyError', () => {
+    expect(FailureClassifier.classifyError(
+      'remote: Permission to o/r.git denied to user.',
+    )).toBe('git-publish-auth');
+  });
+});
+
 describe('FailureClassifier.classifyWorkFailure', () => {
   it('classifies a missing installed package', () => {
     expect(FailureClassifier.classifyWorkFailure(DRAFTER_CORE_MISSING_ERROR)).toBe('dependency-missing');
@@ -202,6 +251,14 @@ describe('FailureClassifier predicates', () => {
     }
     expect(FailureClassifier.isSshInfra('liveness_stall')).toBe(false);
     expect(FailureClassifier.isSshInfra(undefined)).toBe(false);
+  });
+
+  it('isGitPublish matches every git publish bucket and nothing else', () => {
+    for (const cls of GIT_PUBLISH_FAILURE_CLASSES) {
+      expect(FailureClassifier.isGitPublish(cls)).toBe(true);
+    }
+    expect(FailureClassifier.isGitPublish('ssh-env-invalid-export')).toBe(false);
+    expect(FailureClassifier.isGitPublish(undefined)).toBe(false);
   });
 
   it('isCancellation matches operator cancellations only', () => {

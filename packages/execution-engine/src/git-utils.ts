@@ -54,6 +54,99 @@ export function sanitizeBranchForPath(branch: string): string {
   return branch.replace(/\//g, '-');
 }
 
+const TRANSIENT_GIT_PUSH_ERROR_PATTERN = new RegExp([
+  'could not resolve host',
+  'could not resolve hostname',
+  'temporary failure in name resolution',
+  'network is unreachable',
+  'no route to host',
+  'connection timed out',
+  'operation timed out',
+  'connection reset by peer',
+  'connection refused',
+  'the requested url returned error: 5\\d\\d',
+  '\\b502\\b',
+  '\\b503\\b',
+  '\\b504\\b',
+  '\\bECONNRESET\\b',
+  '\\bETIMEDOUT\\b',
+  '\\bEAI_AGAIN\\b',
+].join('|'), 'i');
+
+export function toGitHubSshRemoteUrl(remoteUrl: string): string | undefined {
+  const trimmed = remoteUrl.trim();
+  const https = trimmed.match(/^https:\/\/github\.com\/([^/]+)\/(.+?)(?:\.git)?\/?$/i);
+  if (https) {
+    const repo = https[2].replace(/\.git$/i, '');
+    return `git@github.com:${https[1]}/${repo}.git`;
+  }
+  const sshScheme = trimmed.match(/^ssh:\/\/git@github\.com\/([^/]+)\/(.+?)(?:\.git)?\/?$/i);
+  if (sshScheme) {
+    const repo = sshScheme[2].replace(/\.git$/i, '');
+    return `git@github.com:${sshScheme[1]}/${repo}.git`;
+  }
+  return undefined;
+}
+
+export function isGitHubHttpsOAuthPushRejection(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/without [`']workflow[`'] scope/i.test(message)) return true;
+  if (/Authentication failed for 'https:\/\/github\.com\//i.test(message)) return true;
+  if (/Permission to .+ denied/i.test(message)) return true;
+  if (/Invalid username or token/i.test(message)) return true;
+  return /The requested URL returned error: 403/i.test(message) && /github\.com/i.test(message);
+}
+
+export function isTransientGitPushError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return TRANSIENT_GIT_PUSH_ERROR_PATTERN.test(message)
+    || isTransientGitHubCliError(err);
+}
+
+export interface GitPushRecoveryDeps {
+  remoteName: string;
+  getRemoteUrl: () => Promise<string>;
+  setRemoteUrl: (url: string) => Promise<void>;
+}
+
+async function attemptPushWithOptionalSshFallback(
+  attemptPush: () => Promise<void>,
+  deps?: GitPushRecoveryDeps,
+): Promise<void> {
+  try {
+    await attemptPush();
+  } catch (err) {
+    if (!deps || !isGitHubHttpsOAuthPushRejection(err)) throw err;
+    const currentUrl = (await deps.getRemoteUrl()).trim();
+    const sshUrl = toGitHubSshRemoteUrl(currentUrl);
+    if (!sshUrl || sshUrl === currentUrl) throw err;
+    await deps.setRemoteUrl(sshUrl);
+    await attemptPush();
+  }
+}
+
+export async function pushGitWithGitHubRecovery(
+  attemptPush: () => Promise<void>,
+  deps?: GitPushRecoveryDeps,
+): Promise<void> {
+  const transientAttempts = 3;
+  const delayMs = 250;
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= transientAttempts; attempt++) {
+    try {
+      await attemptPushWithOptionalSshFallback(attemptPush, deps);
+      return;
+    } catch (err) {
+      lastErr = err;
+      if (attempt >= transientAttempts || !isTransientGitPushError(err)) {
+        throw err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delayMs * attempt));
+    }
+  }
+  throw lastErr;
+}
+
 export function isGitRefLockRace(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
   return /cannot lock ref\b/i.test(message)

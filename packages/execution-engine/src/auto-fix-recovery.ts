@@ -34,6 +34,7 @@ import {
   normalizeAutoFixRetryBudget,
   shouldSkipAutoFixForError,
   isLivenessFailureTask,
+  isGitPublishFailureTask,
   isSshInfraFailureTask,
   isSpendGateFailureTask,
 } from './auto-fix-gating.js';
@@ -319,6 +320,7 @@ function isRuntimeAutoFixEligibleTask(task: TaskState, options: AutoFixRecoveryP
   if (isLivenessFailureTask(task)) return false;
   // SSH infra buckets are owned by infra-repair; generic autofix must not race it.
   if (isSshInfraFailureTask(task)) return false;
+  if (isGitPublishFailureTask(task)) return false;
   if (isSpendGateFailureTask(task)) return false;
   const max = retryBudgetForTask(task, options);
   if (max <= 0) return false;

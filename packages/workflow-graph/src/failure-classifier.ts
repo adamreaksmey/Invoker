@@ -1,4 +1,11 @@
-import type { AgentFailureClass, FailureClass, SshInfraFailureClass, WorkFailureClass } from './types.js';
+import type {
+  AgentFailureClass,
+  FailureClass,
+  GitPublishFailureClass,
+  SshInfraFailureClass,
+  WorkFailureClass,
+} from './types.js';
+import { isGitPublishFailureClass } from './types.js';
 
 /**
  * Single source of truth for categorizing task failures from their error text.
@@ -14,6 +21,12 @@ import type { AgentFailureClass, FailureClass, SshInfraFailureClass, WorkFailure
  * async CI-log fetch and the log is not in `execution.error`, so it stays in
  * `ci-failure-infra-classifier.ts`.
  */
+export const GIT_PUBLISH_FAILURE_CLASSES: readonly GitPublishFailureClass[] = [
+  'git-publish-workflow-scope',
+  'git-publish-auth',
+  'git-publish-protected-branch',
+];
+
 export const SSH_INFRA_FAILURE_CLASSES: readonly SshInfraFailureClass[] = [
   'ssh-env-invalid-export',
   'ssh-provision-failed',
@@ -101,6 +114,32 @@ export class FailureClassifier {
     }
     if (this.isTransientTransportError(errorText)) {
       return 'ssh-transport-transient';
+    }
+    const gitPublish = this.classifyGitPublishError(errorText);
+    if (gitPublish) return gitPublish;
+    return undefined;
+  }
+
+  static classifyGitPublishError(errorText: string | undefined): GitPublishFailureClass | undefined {
+    if (typeof errorText !== 'string') return undefined;
+    if (/without [`']workflow[`'] scope/i.test(errorText)) {
+      return 'git-publish-workflow-scope';
+    }
+    if (
+      /protected branch hook declined/i.test(errorText)
+      || /Repository rule violations found/i.test(errorText)
+      || /GH006:/i.test(errorText)
+      || /GH013:/i.test(errorText)
+    ) {
+      return 'git-publish-protected-branch';
+    }
+    if (
+      /Permission to .+ denied/i.test(errorText)
+      || /Authentication failed for/i.test(errorText)
+      || /Invalid username or token/i.test(errorText)
+      || /The requested URL returned error: 403/i.test(errorText)
+    ) {
+      return 'git-publish-auth';
     }
     return undefined;
   }
@@ -190,5 +229,9 @@ export class FailureClassifier {
 
   static isSpendGate(failureClass: FailureClass | undefined): boolean {
     return failureClass === 'agent-spend-gate';
+  }
+
+  static isGitPublish(failureClass: FailureClass | undefined): failureClass is GitPublishFailureClass {
+    return isGitPublishFailureClass(failureClass);
   }
 }

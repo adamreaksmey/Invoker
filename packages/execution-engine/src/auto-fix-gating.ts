@@ -27,3 +27,7 @@ export function isSshInfraFailureTask(task: Pick<TaskState, 'execution'>): boole
 export function isSpendGateFailureTask(task: Pick<TaskState, 'execution'>): boolean {
   return FailureClassifier.isSpendGate(task.execution.failureClass);
 }
+
+export function isGitPublishFailureTask(task: Pick<TaskState, 'execution'>): boolean {
+  return FailureClassifier.isGitPublish(task.execution.failureClass);
+}

@@ -11,7 +11,7 @@ import type { AgentRegistry } from './agent-registry.js';
 import { assertExecutionModelSupported, DEFAULT_EXECUTION_AGENT } from './agent.js';
 import { checkStaleness } from './git-staleness-detector.js';
 import { assertNotGitConfigMutation, ensureRemoteUrl } from './git-config-mutation.js';
-import { isGitRefLockRace } from './git-utils.js';
+import { isGitRefLockRace, pushGitWithGitHubRecovery } from './git-utils.js';
 import { childProcessHasExited, cleanElectronEnv, cleanGitRepositoryEnv, killProcessGroup, SIGKILL_TIMEOUT_MS, terminateChildProcessGroup } from './process-utils.js';
 import { getExecutorStartTimeoutMs } from './task-runner-launch-support.js';
 import { resolveHandoffScrubCommand } from './handoff-scrub-command.js';
@@ -1254,21 +1254,37 @@ export abstract class BaseExecutor<TEntry extends BaseEntry> implements Executor
       }
       const sourceSha = (await this.execGitSimple(['rev-parse', '--verify', `${sourceRef}^{commit}`], cwd)).trim();
       const branchRef = `${sourceSha}:${destinationRef}`;
-      try {
-        await this.execGitSimpleWithNetworkTimeout(
-          ['push', '--force-with-lease', remoteName, branchRef],
-          cwd,
-        );
-      } catch (err) {
-        if (!this.isRetryableLeasePublishError(err)) {
-          throw err;
+      const runLeasePush = async (): Promise<void> => {
+        try {
+          await this.execGitSimpleWithNetworkTimeout(
+            ['push', '--force-with-lease', remoteName, branchRef],
+            cwd,
+          );
+        } catch (err) {
+          if (!this.isRetryableLeasePublishError(err)) {
+            throw err;
+          }
+          await this.fetchRemoteBranchForLease(cwd, remoteName, branch);
+          await this.execGitSimpleWithNetworkTimeout(
+            ['push', '--force-with-lease', remoteName, branchRef],
+            cwd,
+          );
         }
-        await this.fetchRemoteBranchForLease(cwd, remoteName, branch);
-        await this.execGitSimpleWithNetworkTimeout(
-          ['push', '--force-with-lease', remoteName, branchRef],
-          cwd,
-        );
-      }
+      };
+      await pushGitWithGitHubRecovery(runLeasePush, {
+        remoteName,
+        getRemoteUrl: async () => (
+          await this.execGitSimple(['remote', 'get-url', remoteName], cwd)
+        ).trim(),
+        setRemoteUrl: async (url) => {
+          await ensureRemoteUrl({
+            cwd,
+            remote: remoteName,
+            url,
+            context: { caller: `${this.type}.pushBranchToRemote`, detail: branch },
+          });
+        },
+      });
       const verified = await this.pushedBranchMatchesSha(cwd, remoteName, branch, sourceSha);
       if (!verified) {
         await this.execGitSimpleWithNetworkTimeout(
