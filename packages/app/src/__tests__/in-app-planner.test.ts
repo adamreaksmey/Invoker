@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -722,6 +723,93 @@ describe('planning chat', () => {
       draftPlanAvailable: true,
       draftPlanText: expect.stringContaining('repoUrl: https://github.com/acme/widgets.git'),
     });
+  });
+
+  it('treats a local checkout and its origin remote as the same repository', async () => {
+    const localRepo = mkdtempSync(join(tmpdir(), 'planning-local-origin-'));
+    try {
+      execSync('git init', { cwd: localRepo, stdio: 'ignore' });
+      execSync('git remote add origin git@github.com:meksys-dev/hrm-meta.git', {
+        cwd: localRepo,
+        stdio: 'ignore',
+      });
+      const draftedRepo = 'https://github.com/meksys-dev/hrm-meta.git';
+      const sessions = createInAppPlanningChatSessions();
+      const session = planningSession({
+        id: 'local-origin-equivalent',
+        title: 'Local origin equivalent',
+        repoUrl: localRepo,
+        baseBranch: 'main',
+      });
+      sessions.set(session.id, session);
+      const plannerReplyOverride = vi.fn().mockResolvedValue(validPlanForRepo(draftedRepo));
+
+      const result = await sendPlanningChatMessage({
+        sessionId: session.id,
+        message: 'draft the full plan',
+      }, {
+        config: {},
+        loadGeneratedPlan: vi.fn(),
+        sessions,
+        planningCommandBuilder,
+        plannerReplyOverride,
+      });
+
+      expect(plannerReplyOverride).toHaveBeenCalledTimes(1);
+      expect(result).toMatchObject({
+        ok: true,
+        draftPlanAvailable: true,
+        draftPlanText: expect.stringContaining(`repoUrl: ${draftedRepo}`),
+      });
+    } finally {
+      rmSync(localRepo, { recursive: true, force: true });
+    }
+  });
+
+  it('still rejects a local checkout when the draft targets a different remote', async () => {
+    const localRepo = mkdtempSync(join(tmpdir(), 'planning-local-origin-mismatch-'));
+    try {
+      execSync('git init', { cwd: localRepo, stdio: 'ignore' });
+      execSync('git remote add origin git@github.com:meksys-dev/hrm-meta.git', {
+        cwd: localRepo,
+        stdio: 'ignore',
+      });
+      const draftedRepo = 'git@github.com:other/hrm-meta.git';
+      const sessions = createInAppPlanningChatSessions();
+      const session = planningSession({
+        id: 'local-origin-mismatch',
+        title: 'Local origin mismatch',
+        repoUrl: localRepo,
+        baseBranch: 'main',
+      });
+      sessions.set(session.id, session);
+      const plannerReplyOverride = vi.fn()
+        .mockResolvedValueOnce(validPlanForRepo(draftedRepo))
+        .mockResolvedValueOnce(validPlanForRepo('.'));
+
+      const result = await sendPlanningChatMessage({
+        sessionId: session.id,
+        message: 'draft the full plan',
+      }, {
+        config: {},
+        loadGeneratedPlan: vi.fn(),
+        sessions,
+        planningCommandBuilder,
+        plannerReplyOverride,
+      });
+
+      expect(plannerReplyOverride).toHaveBeenCalledTimes(2);
+      expect(plannerReplyOverride.mock.calls[1]?.[0]).toContain(
+        `Draft rejected because it silently changed repositories to ${draftedRepo}.`,
+      );
+      expect(result).toMatchObject({
+        ok: true,
+        draftPlanAvailable: true,
+        draftPlanText: expect.stringContaining('repoUrl: .'),
+      });
+    } finally {
+      rmSync(localRepo, { recursive: true, force: true });
+    }
   });
 
   it('keeps unauthorized YAML from becoming draft-ready and refuses submit', async () => {

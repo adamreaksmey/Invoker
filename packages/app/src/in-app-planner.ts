@@ -1,6 +1,8 @@
+import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { trimPreservingEscapeSequences } from './embedded-terminal-manager.js';
 import type {
   InAppPlanRequest,
@@ -44,6 +46,7 @@ import {
   curatedCursorPlanningModelIds,
   cursorMorePresetKey,
   forgeProjectIdentityFromUrl,
+  isLocalPlanningRepoUrl,
   labelForBuiltinPlanningPreset,
   resolveInvokerHomeRoot,
 } from '@invoker/contracts';
@@ -579,13 +582,49 @@ function canonicalRemoteRepositoryIdentity(host: string, path: string): string {
   return `${canonicalHost}/${withoutGitSuffix}`;
 }
 
+function localRepoFilesystemPath(repoUrl: string): string | undefined {
+  const trimmed = repoUrl.trim();
+  if (!isLocalPlanningRepoUrl(trimmed)) return undefined;
+  if (/^file:/i.test(trimmed)) {
+    try {
+      return fileURLToPath(trimmed);
+    } catch {
+      return undefined;
+    }
+  }
+  return trimmed;
+}
+
+function resolveLocalRepoOriginUrl(repoUrl: string): string | undefined {
+  const dir = localRepoFilesystemPath(repoUrl);
+  if (!dir || !existsSync(dir)) return undefined;
+  try {
+    const origin = execFileSync('git', ['-C', dir, 'remote', 'get-url', 'origin'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 5_000,
+    }).trim();
+    return origin || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function repositoryIdentitiesForBinding(repoUrl: string): Set<string> {
+  const identities = new Set<string>([canonicalGitRepositoryIdentity(repoUrl)]);
+  if (!isLocalPlanningRepoUrl(repoUrl)) return identities;
+  const origin = resolveLocalRepoOriginUrl(repoUrl);
+  if (origin) identities.add(canonicalGitRepositoryIdentity(origin));
+  return identities;
+}
+
 async function silentRepoMismatch(
   session: InAppPlanningChatSession,
   planText: string,
 ): Promise<string | undefined> {
   const sessionRepoUrl = session.repoUrl;
   if (!sessionRepoUrl) return undefined;
-  const sessionRepoIdentity = canonicalGitRepositoryIdentity(sessionRepoUrl);
+  const sessionIdentities = repositoryIdentitiesForBinding(sessionRepoUrl);
   const { parsePlanSubmissionBundle } = await import('./plan-parser.js');
   const submission = parsePlanSubmissionBundle(planText);
   const userText = session.messages
@@ -594,11 +633,14 @@ async function silentRepoMismatch(
     .join('\n');
   return submission.plans
     .map((plan) => plan.repoUrl)
-    .find((repoUrl): repoUrl is string => Boolean(
-      repoUrl
-      && canonicalGitRepositoryIdentity(repoUrl) !== sessionRepoIdentity
-      && !userText.includes(repoUrl),
-    ));
+    .find((repoUrl): repoUrl is string => {
+      if (!repoUrl?.trim()) return false;
+      const trimmed = repoUrl.trim();
+      if (trimmed === '.') return false;
+      if (sessionIdentities.has(canonicalGitRepositoryIdentity(trimmed))) return false;
+      if (userText.includes(repoUrl)) return false;
+      return true;
+    });
 }
 
 const NO_COMPLETE_PLAN_DRAFTED_ERROR = 'No complete plan drafted yet. Ask the AI to create a full plan, then submit again.';
