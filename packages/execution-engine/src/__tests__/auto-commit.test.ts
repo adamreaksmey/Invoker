@@ -2279,6 +2279,28 @@ describe('BaseExecutor.handleProcessExit push semantics', () => {
     expect(response?.status).toBe('failed');
     expect(response?.outputs.exitCode).toBe(1);
     expect(response?.outputs.error).toBe('push denied');
+    expect(response?.outputs.commitHash).toMatch(/^[0-9a-f]{40}$/);
+  });
+
+  it('classifies oauth workflow scope push failures on exit 0', async () => {
+    execSync('git checkout -b invoker/workflow-scope', { cwd: cloneDir });
+    writeFileSync(join(cloneDir, 't.txt'), 'x');
+    execSync('git add -A && git commit -m task', { cwd: cloneDir });
+
+    const req = makeRequest('task-workflow-scope', { description: 'x' });
+    const entry = executor.registerTestEntry('e-workflow-scope', req);
+    let response: WorkResponse | undefined;
+    entry.completeListeners.add((r) => { response = r; });
+
+    vi.spyOn(BaseExecutor.prototype as any, 'pushBranchToRemote').mockResolvedValue(
+      "remote: refusing to allow an OAuth App to create or update workflow `.github/workflows/ci.yml` without `workflow` scope",
+    );
+
+    await executor.testHandleProcessExit('e-workflow-scope', req, cloneDir, 0, { branch: 'invoker/workflow-scope' });
+
+    expect(response?.status).toBe('failed');
+    expect(response?.outputs.failureClass).toBe('git-publish-workflow-scope');
+    expect(response?.outputs.commitHash).toMatch(/^[0-9a-f]{40}$/);
   });
 
   it('keeps task completed when exit 0 but push fails due to transient network transport', async () => {

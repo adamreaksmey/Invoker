@@ -3,8 +3,8 @@ import {
   isGitPublishFailureClass,
   type FailureClass,
   type GitPublishFailureClass,
-} from '@invoker/workflow-graph';
-import type { TaskState } from '@invoker/workflow-core';
+  type TaskState,
+} from '@invoker/workflow-core';
 
 export function resolveTaskGitPublishFailureClass(task: TaskState): GitPublishFailureClass | undefined {
   const fromPersisted = task.execution.failureClass;

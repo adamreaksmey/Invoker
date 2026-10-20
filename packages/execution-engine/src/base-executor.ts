@@ -3,7 +3,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { WorkRequest, WorkResponse } from '@invoker/contracts';
-import type { FailureClass } from '@invoker/workflow-graph';
+import type { FailureClass } from '@invoker/workflow-core';
 import { classifyPushFailure } from './git-publish-recovery.js';
 import { cancelOwnedStartupChild, type ExecutorStartup } from './executor.js';
 import type { Executor, ExecutorHandle, PersistedTaskMeta, TerminalSpec, Unsubscribe } from './executor.js';

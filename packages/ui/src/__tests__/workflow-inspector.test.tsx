@@ -1297,6 +1297,7 @@ describe('WorkflowInspector failed task recovery actions', () => {
   it('shows git publish remediation and fix/restart buttons in the error section', () => {
     const onFix = vi.fn();
     const onRestartTask = vi.fn();
+    const onRetryBranchPublish = vi.fn();
     const pushError = "remote: refusing to allow an OAuth App to create or update workflow without 'workflow' scope";
 
     render(
@@ -1309,6 +1310,8 @@ describe('WorkflowInspector failed task recovery actions', () => {
             exitCode: 1,
             failureClass: 'git-publish-workflow-scope',
             commit: '238519efeabc1234567890abcdef1234567890ab',
+            branch: 'invoker/task-1',
+            workspacePath: '/tmp/worktree',
           },
         })}
         executionHarnesses={[{ name: 'codex', supportedModels: [] }]}
@@ -1316,6 +1319,7 @@ describe('WorkflowInspector failed task recovery actions', () => {
         advancedExpanded={false}
         onFix={onFix}
         onRestartTask={onRestartTask}
+        onRetryBranchPublish={onRetryBranchPublish}
         onToggleCollapsed={() => {}}
         onToggleAdvanced={() => {}}
       />,
@@ -1324,6 +1328,8 @@ describe('WorkflowInspector failed task recovery actions', () => {
     expect(screen.getByTestId('inspector-error-git-publish-remediation')).toHaveTextContent(
       'gh auth refresh -h github.com -s workflow',
     );
+    fireEvent.click(screen.getByTestId('inspector-error-retry-push'));
+    expect(onRetryBranchPublish).toHaveBeenCalledWith('task-1');
     fireEvent.click(screen.getByTestId('inspector-error-fix-with-agent'));
     expect(onFix).toHaveBeenCalledWith('task-1', 'codex');
     fireEvent.click(screen.getByTestId('inspector-error-restart-task'));

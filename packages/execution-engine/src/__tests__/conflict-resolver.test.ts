@@ -100,6 +100,24 @@ describe('buildFixPrompt', () => {
     expect(prompt).toContain('merge operation failed');
     expect(prompt).toContain('Unknown error');
   });
+
+  it('generates git publish recovery prompt when local commit exists', () => {
+    const commit = 'b'.repeat(40);
+    const task = {
+      description: 'Update CI workflow',
+      config: { prompt: 'Add a workflow step' },
+      execution: {
+        error: "remote: refusing to allow an OAuth App to create or update workflow without 'workflow' scope",
+        failureClass: 'git-publish-workflow-scope',
+        commit,
+        branch: 'invoker/task-a',
+      },
+    };
+    const prompt = buildFixPrompt(task, 'git push failed');
+    expect(prompt).toContain(`committed locally at ${commit}`);
+    expect(prompt).toContain('Do not re-implement the original task');
+    expect(prompt).toContain('gh auth status');
+  });
 });
 
 describe('resolveConflictImpl', () => {

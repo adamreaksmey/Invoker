@@ -2219,7 +2219,7 @@ export function App() {
     } catch (err) {
       notifyMutationError('Retry push failed:', err);
     }
-  }, [invoker, trackAcceptedMutation]);
+  }, [invoker, trackAcceptedMutation, refreshTaskGraph]);
 
   const handleOpenTerminal = useCallback(
     (taskId: string) => {
