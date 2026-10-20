@@ -61,8 +61,10 @@ describe('planning composer repo binding', () => {
     await waitFor(() => {
       expect(screen.getByTestId('planning-repo-status')).toHaveTextContent('tmp/repo-a');
     });
-    expect(screen.getByTestId('invoker-terminal-clone-status')).toHaveTextContent('Cloned tmp/repo-a on main.');
-    expect(screen.getAllByText('Cloned tmp/repo-a on main.').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByTestId('invoker-terminal-clone-status')).toHaveTextContent(
+      'Ready: tmp/repo-a on main (isolated planning worktree).',
+    );
+    expect(screen.getAllByText('Ready: tmp/repo-a on main (isolated planning worktree).').length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByTestId('invoker-terminal-repo-error')).not.toBeInTheDocument();
     expect(screen.getByTestId('invoker-terminal-repo')).toBeDisabled();
     expect(screen.getByTestId('invoker-terminal-base-branch')).toBeDisabled();
@@ -219,14 +221,16 @@ describe('planning composer repo binding', () => {
     await waitFor(() => {
       expect(screen.getByTestId('invoker-terminal-send-spinner')).toBeInTheDocument();
     });
-    expect(screen.getByTestId('invoker-terminal-clone-status')).toHaveTextContent('Cloning repository…');
+    expect(screen.getByTestId('invoker-terminal-clone-status')).toHaveTextContent('Preparing repository…');
 
     resolveRebind({ ok: true, action: 'provision', baseBranch: 'main' });
 
     await waitFor(() => {
       expect(screen.queryByTestId('invoker-terminal-send-spinner')).not.toBeInTheDocument();
     });
-    expect(screen.getByTestId('invoker-terminal-clone-status')).toHaveTextContent('Cloned tmp/repo-a on main.');
+    expect(screen.getByTestId('invoker-terminal-clone-status')).toHaveTextContent(
+      'Ready: tmp/repo-a on main (isolated planning worktree).',
+    );
     expect(mock.api.planningChatSend).not.toHaveBeenCalled();
   });
 
@@ -302,7 +306,9 @@ describe('planning composer repo binding', () => {
     await openComposerOptions();
     checkPlanningRepo();
     await waitFor(() => {
-      expect(screen.getByTestId('invoker-terminal-clone-status')).toHaveTextContent('Cloned tmp/repo-a on main.');
+      expect(screen.getByTestId('invoker-terminal-clone-status')).toHaveTextContent(
+        'Ready: tmp/repo-a on main (isolated planning worktree).',
+      );
     });
 
     fireEvent.change(screen.getByTestId('invoker-terminal-input'), { target: { value: 'hello planner' } });
