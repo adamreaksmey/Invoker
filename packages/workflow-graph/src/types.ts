@@ -304,13 +304,27 @@ export type StoppedFailureClass = 'cancelled' | 'owner-interrupted';
 
 export type WorkFailureClass = 'dependency-missing' | 'branch-head-moved' | 'branch-missing-on-remote';
 
+export type GitPublishFailureClass =
+  | 'git-publish-workflow-scope'
+  | 'git-publish-auth'
+  | 'git-publish-protected-branch';
+
 export type FailureClass =
   | 'liveness_stall'
   | SshInfraFailureClass
   | TransientFailureClass
   | AgentFailureClass
   | StoppedFailureClass
-  | WorkFailureClass;
+  | WorkFailureClass
+  | GitPublishFailureClass;
+
+export function isGitPublishFailureClass(
+  failureClass: FailureClass | undefined,
+): failureClass is GitPublishFailureClass {
+  return failureClass === 'git-publish-workflow-scope'
+    || failureClass === 'git-publish-auth'
+    || failureClass === 'git-publish-protected-branch';
+}
 
 export function isLivenessFailureClass(failureClass: FailureClass | undefined): boolean {
   return failureClass === 'liveness_stall';

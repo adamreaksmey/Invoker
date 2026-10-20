@@ -17,6 +17,7 @@ import {
   getRunningPhaseLabel,
 } from '../lib/colors.js';
 import { formatTaskExecutionErrorForDisplay } from '../lib/task-execution-error-display.js';
+import { FailedTaskErrorActions } from './FailedTaskErrorActions.js';
 import { useNow } from '../hooks/useNow.js';
 import { mergeGatePanelHeading } from '../lib/merge-gate.js';
 import { MarkdownText } from './MarkdownText.js';
@@ -151,6 +152,8 @@ interface TaskPanelProps {
   mergeMode?: string;
   onSetMergeMode?: (workflowId: string, mergeMode: string) => Promise<void>;
   showApprovalActions?: boolean;
+  onFix?: (taskId: string, agentName: string) => void;
+  onRestartTask?: (taskId: string) => void;
 }
 
 function formatDate(date?: Date | string): string {
@@ -266,6 +269,8 @@ export function TaskPanel({
   mergeMode,
   onSetMergeMode,
   showApprovalActions = true,
+  onFix,
+  onRestartTask,
 }: TaskPanelProps) {
   const [isEditingCommand, setIsEditingCommand] = useState(false);
   const [editCommandValue, setEditCommandValue] = useState('');
@@ -376,6 +381,10 @@ export function TaskPanel({
     return draft !== current;
   }).length;
   const displayError = formatTaskExecutionErrorForDisplay(task.execution.error);
+  const fixAgentName = task.config.executionAgent
+    ?? task.execution.agentName
+    ?? executionAgents?.[0]
+    ?? 'claude';
 
   const handleSaveGatePolicies = async () => {
     if (!onSetExternalGatePolicies || changedGatePolicyCount === 0) {
@@ -727,6 +736,14 @@ export function TaskPanel({
           {task.execution.exitCode !== undefined && (
             <p className="text-xs text-red-400 mt-1">Exit code: {task.execution.exitCode}</p>
           )}
+          <FailedTaskErrorActions
+            task={task}
+            displayError={displayError}
+            fixAgentName={fixAgentName}
+            onFix={onFix}
+            onRestartTask={onRestartTask}
+            testIdPrefix="task-panel-error"
+          />
         </div>
       )}
 

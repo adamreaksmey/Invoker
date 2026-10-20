@@ -144,4 +144,24 @@ tasks:
 
     expect(request.inputs).not.toHaveProperty('freshness');
   });
+
+  it('sets requiresRemoteBranchPush false for purely local worktree workflows', async () => {
+    const host = makeHost();
+    host.orchestrator.getAllTasks = vi.fn().mockReturnValue([
+      makeTask(),
+      {
+        ...makeTask(),
+        id: 'wf-1/task-2',
+        dependencies: ['wf-1/task-1'],
+      },
+    ]);
+
+    const request = await buildWorkRequest(host, {
+      task: makeTask(),
+      attemptId: 'wf-1/task-1-a12345678',
+      bench: vi.fn(),
+    });
+
+    expect(request.inputs.requiresRemoteBranchPush).toBe(false);
+  });
 });

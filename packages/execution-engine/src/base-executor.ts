@@ -1494,8 +1494,14 @@ export abstract class BaseExecutor<TEntry extends BaseEntry> implements Executor
     }
 
     let pushError: string | undefined;
-    if (opts?.branch) {
+    const shouldPublishBranch = opts?.branch && request.inputs.requiresRemoteBranchPush !== false;
+    if (shouldPublishBranch) {
       pushError = await this.pushBranchToRemote(cwd, opts.branch, executionId, undefined, commitHash);
+    } else if (opts?.branch && request.inputs.requiresRemoteBranchPush === false) {
+      this.emitOutput(
+        executionId,
+        `[${this.type}] Skipping remote branch publish; downstream worktree tasks resolve ${opts.branch} from the local RepoPool mirror.\n`,
+      );
     }
     if (effectiveExitCode === 0 && pushError !== undefined && opts?.branch) {
       if (this.isTransientGitTransportError(pushError)) {

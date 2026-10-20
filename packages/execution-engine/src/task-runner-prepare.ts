@@ -15,6 +15,7 @@ import type { WorkRequest } from '@invoker/contracts';
 
 import { RESTART_TO_BRANCH_TRACE, traceExecution } from './exec-trace.js';
 import { formatLifecycleTag, extractAttemptSuffix } from './branch-utils.js';
+import { computeRequiresRemoteBranchPush } from './remote-branch-transport.js';
 import type { TaskRunnerPhaseHost } from './task-runner-phase-host.js';
 
 /**
@@ -142,6 +143,18 @@ export async function buildWorkRequest(
   const actionType = host.determineActionType(task);
   const executionAgent = host.resolveExecutionAgent(task);
   const executionModel = host.resolveExecutionModel(task);
+  const workflowId = task.config.workflowId;
+  const listWorkflowTasks = host.orchestrator.getAllTasks?.bind(host.orchestrator);
+  const workflowTasks = workflowId && listWorkflowTasks
+    ? listWorkflowTasks().filter((candidate) => candidate.config.workflowId === workflowId)
+    : [];
+  const requiresRemoteBranchPush = workflowId && listWorkflowTasks
+    ? computeRequiresRemoteBranchPush({
+      task,
+      workflowIntermediateRepoUrl: workflow?.intermediateRepoUrl,
+      workflowTasks,
+    })
+    : true;
   const request: WorkRequest = {
     requestId: randomUUID(),
     actionId: task.id,
@@ -174,6 +187,7 @@ export async function buildWorkRequest(
           workspacePath: task.execution.workspacePath,
         }
         : undefined,
+      requiresRemoteBranchPush,
     },
     callbackUrl: '',
     timestamps: {

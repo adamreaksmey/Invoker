@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { TaskPanel } from '../components/TaskPanel.js';
 import type { TaskState } from '../types.js';
 
@@ -35,6 +35,37 @@ describe('TaskPanel error display', () => {
     (window as unknown as { invoker: { getEvents: typeof getEvents } }).invoker = { getEvents };
     return getEvents;
   }
+
+  it('shows git publish remediation and recovery actions for failed publish tasks', () => {
+    const onFix = vi.fn();
+    const onRestartTask = vi.fn();
+    const task = makeTask({
+      config: { command: 'echo ok', executionAgent: 'claude' },
+      execution: {
+        error: "remote: refusing to allow an OAuth App to create or update workflow without 'workflow' scope",
+        exitCode: 1,
+        failureClass: 'git-publish-workflow-scope',
+        commit: '238519efeabc1234567890abcdef1234567890ab',
+      },
+    });
+    render(
+      <TaskPanel
+        task={task}
+        onProvideInput={noop}
+        onApprove={noop}
+        onReject={noop}
+        onSelectExperiment={noop}
+        onFix={onFix}
+        onRestartTask={onRestartTask}
+      />,
+    );
+
+    expect(screen.getByTestId('task-panel-error-git-publish-remediation')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Fix with Claude' }));
+    expect(onFix).toHaveBeenCalledWith('error-test', 'claude');
+    fireEvent.click(screen.getByRole('button', { name: 'Restart Task' }));
+    expect(onRestartTask).toHaveBeenCalledWith('error-test');
+  });
 
   it('shows error message and exit code when both present', () => {
     const task = makeTask({

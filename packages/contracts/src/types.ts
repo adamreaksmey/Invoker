@@ -80,6 +80,12 @@ export interface WorkRequestInputs {
     branch: string;
     workspacePath: string;
   };
+  /**
+   * When false, worktree executors skip publishing the experiment branch to origin
+   * after a successful task exit; downstream local worktree tasks resolve the ref
+   * from the shared RepoPool mirror instead.
+   */
+  requiresRemoteBranchPush?: boolean;
 }
 
 export interface WorkRequest {

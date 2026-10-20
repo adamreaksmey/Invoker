@@ -2303,6 +2303,25 @@ describe('BaseExecutor.handleProcessExit push semantics', () => {
     expect(entry.outputBuffer.join('')).toContain('transient git transport error');
   });
 
+  it('skips remote branch publish when requiresRemoteBranchPush is false', async () => {
+    execSync('git checkout -b invoker/local-only', { cwd: cloneDir });
+    writeFileSync(join(cloneDir, 't.txt'), 'x');
+    execSync('git add -A && git commit -m task', { cwd: cloneDir });
+
+    const req = makeRequest('task-local-only', { description: 'x', requiresRemoteBranchPush: false });
+    const entry = executor.registerTestEntry('e-local-only', req);
+    let response: WorkResponse | undefined;
+    entry.completeListeners.add((r) => { response = r; });
+
+    const pushSpy = vi.spyOn(BaseExecutor.prototype as any, 'pushBranchToRemote');
+
+    await executor.testHandleProcessExit('e-local-only', req, cloneDir, 0, { branch: 'invoker/local-only' });
+
+    expect(pushSpy).not.toHaveBeenCalled();
+    expect(response?.status).toBe('completed');
+    expect(entry.outputBuffer.join('')).toContain('Skipping remote branch publish');
+  });
+
   it('keeps task completed when exit 0 produces no commit and branch push has no local ref', async () => {
     execSync('git checkout -b invoker/noop-push', { cwd: cloneDir });
 

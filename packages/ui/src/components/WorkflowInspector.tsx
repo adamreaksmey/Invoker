@@ -7,6 +7,8 @@ import { githubMergeNotice, mergeGateLeavesMergeToGitHub } from '../lib/merge-ga
 import { mutationFailureTitle } from '../lib/mutation-failure-display.js';
 import { WorkerDecisionsSection } from './WorkerDecisionsSection.js';
 import { FixFailureBanner } from './FixFailureBanner.js';
+import { FailedTaskErrorActions } from './FailedTaskErrorActions.js';
+import { formatTaskExecutionErrorForDisplay } from '../lib/task-execution-error-display.js';
 import type { ActionGraphNode, ExecutionDefaults, ExecutionHarnessOption, WorkflowMutationFailedEvent } from '@invoker/contracts';
 
 type MergeMode = 'manual' | 'automatic' | 'external_review';
@@ -426,6 +428,7 @@ export function WorkflowInspector({
   const showsWorkflowMergeDetails = Boolean(!task && workflow?.id && workflow.onFinish === 'pull_request');
   const isMergeNode = Boolean((task?.config.isMergeNode || showsWorkflowMergeDetails) && workflow?.id);
   const currentAgent = task?.config.executionAgent ?? task?.execution.agentName ?? executionDefaults?.executionAgent ?? 'codex';
+  const displayExecutionError = formatTaskExecutionErrorForDisplay(task?.execution.error);
   const selectedHarness = useMemo(
     () => executionHarnesses?.find((harness) => harness.name === currentAgent) ?? null,
     [currentAgent, executionHarnesses],
@@ -599,10 +602,18 @@ export function WorkflowInspector({
                   Codex is switched off by the daily spend gate. Auto-fix will not retry this task.
                 </p>
               )}
-              <p className="mt-1 text-xs text-red-300 break-words">{task.execution.error}</p>
+              <p className="mt-1 text-xs text-red-300 break-words">{displayExecutionError ?? task.execution.error}</p>
               {task.execution.exitCode !== undefined && task.execution.exitCode !== 0 && (
                 <p className="mt-2 text-xs text-red-300">Exit code: {task.execution.exitCode}</p>
               )}
+              <FailedTaskErrorActions
+                task={task}
+                displayError={displayExecutionError}
+                fixAgentName={currentAgent}
+                onFix={onFix}
+                onRestartTask={onRestartTask}
+                testIdPrefix="inspector-error"
+              />
             </div>
           )}
           {!task?.execution.error && task?.execution.exitCode !== undefined && task.execution.exitCode !== 0 && (

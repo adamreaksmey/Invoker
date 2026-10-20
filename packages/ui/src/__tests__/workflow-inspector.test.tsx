@@ -1293,6 +1293,44 @@ describe('WorkflowInspector Codex spend gate failure', () => {
   });
 });
 
+describe('WorkflowInspector failed task recovery actions', () => {
+  it('shows git publish remediation and fix/restart buttons in the error section', () => {
+    const onFix = vi.fn();
+    const onRestartTask = vi.fn();
+    const pushError = "remote: refusing to allow an OAuth App to create or update workflow without 'workflow' scope";
+
+    render(
+      <WorkflowInspector
+        workflow={workflow}
+        task={makeTask({
+          status: 'failed',
+          execution: {
+            error: pushError,
+            exitCode: 1,
+            failureClass: 'git-publish-workflow-scope',
+            commit: '238519efeabc1234567890abcdef1234567890ab',
+          },
+        })}
+        executionHarnesses={[{ name: 'codex', supportedModels: [] }]}
+        collapsed={false}
+        advancedExpanded={false}
+        onFix={onFix}
+        onRestartTask={onRestartTask}
+        onToggleCollapsed={() => {}}
+        onToggleAdvanced={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId('inspector-error-git-publish-remediation')).toHaveTextContent(
+      'gh auth refresh -h github.com -s workflow',
+    );
+    fireEvent.click(screen.getByTestId('inspector-error-fix-with-agent'));
+    expect(onFix).toHaveBeenCalledWith('task-1', 'codex');
+    fireEvent.click(screen.getByTestId('inspector-error-restart-task'));
+    expect(onRestartTask).toHaveBeenCalledWith('task-1');
+  });
+});
+
 describe('WorkflowInspector fix failure banner', () => {
   const taskError = 'AssertionError: p95=865.2ms budget=200ms';
   const harnesses = [
