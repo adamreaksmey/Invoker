@@ -132,6 +132,8 @@ function requestedExecutionAgents(
   switch (channel) {
     case 'invoker:fix-with-agent':
       return [typeof args[1] === 'string' ? args[1] : config.autoFixAgent];
+    case 'invoker:retry-branch-publish':
+      return [];
     case 'invoker:resolve-conflict':
       return [typeof args[1] === 'string' ? args[1] : config.conflictResolutionAgent];
     case 'invoker:edit-task-agent':

@@ -154,6 +154,7 @@ interface TaskPanelProps {
   showApprovalActions?: boolean;
   onFix?: (taskId: string, agentName: string) => void;
   onRestartTask?: (taskId: string) => void;
+  onRetryBranchPublish?: (taskId: string) => void;
 }
 
 function formatDate(date?: Date | string): string {
@@ -271,6 +272,7 @@ export function TaskPanel({
   showApprovalActions = true,
   onFix,
   onRestartTask,
+  onRetryBranchPublish,
 }: TaskPanelProps) {
   const [isEditingCommand, setIsEditingCommand] = useState(false);
   const [editCommandValue, setEditCommandValue] = useState('');
@@ -742,6 +744,7 @@ export function TaskPanel({
             fixAgentName={fixAgentName}
             onFix={onFix}
             onRestartTask={onRestartTask}
+            onRetryBranchPublish={onRetryBranchPublish}
             testIdPrefix="task-panel-error"
           />
         </div>

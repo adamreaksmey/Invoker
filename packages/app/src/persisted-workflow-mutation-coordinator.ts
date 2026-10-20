@@ -50,6 +50,7 @@ const TASK_SCOPED_MUTATION_CHANNELS = new Set([
   'invoker:delete-task',
   'invoker:resolve-conflict',
   'invoker:fix-with-agent',
+  'invoker:retry-branch-publish',
   'invoker:edit-task-command',
   'invoker:edit-task-prompt',
   'invoker:edit-task-type',

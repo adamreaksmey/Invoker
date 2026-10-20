@@ -3,6 +3,8 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { WorkRequest, WorkResponse } from '@invoker/contracts';
+import type { FailureClass } from '@invoker/workflow-graph';
+import { classifyPushFailure } from './git-publish-recovery.js';
 import { cancelOwnedStartupChild, type ExecutorStartup } from './executor.js';
 import type { Executor, ExecutorHandle, PersistedTaskMeta, TerminalSpec, Unsubscribe } from './executor.js';
 import { bashPreserveOrReset, bashMergeUpstreams, bashFetchNodeRemotes, parsePreserveResult, parseMergeError } from './branch-utils.js';
@@ -1116,6 +1118,15 @@ export abstract class BaseExecutor<TEntry extends BaseEntry> implements Executor
     return { commitHash };
   }
 
+  async retryExistingBranchPublish(
+    cwd: string,
+    branch: string,
+    commitHash: string,
+    branchRepoUrl?: string,
+  ): Promise<string | undefined> {
+    return this.pushBranchToRemote(cwd, branch, undefined, branchRepoUrl, commitHash);
+  }
+
   /**
    * Restore the original branch after task completion.
    * No-op if originalBranch is undefined (e.g., not in a git repo).
@@ -1544,6 +1555,11 @@ export abstract class BaseExecutor<TEntry extends BaseEntry> implements Executor
       error = recordError;
     }
 
+    let pushFailureClass: FailureClass | undefined;
+    if (status === 'failed' && effectiveExitCode === 0 && pushError) {
+      pushFailureClass = classifyPushFailure(pushError);
+    }
+
     const agentSessionId = opts?.agentSessionId;
 
     const response: WorkResponse = {
@@ -1558,6 +1574,7 @@ export abstract class BaseExecutor<TEntry extends BaseEntry> implements Executor
         agentName: opts?.agentName,
         branch: opts?.branch,
         ...(error ? { error } : {}),
+        ...(pushFailureClass ? { failureClass: pushFailureClass } : {}),
         ...(opts?.branch ? { summary: `branch=${opts.branch} commit=${commitHash ?? 'unknown'}` } : {}),
       },
     };

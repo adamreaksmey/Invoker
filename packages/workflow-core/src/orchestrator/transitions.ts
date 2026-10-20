@@ -13,7 +13,15 @@
  * downstream auto-start / deferred re-enqueue sequence are preserved exactly.
  */
 
-import { FailureClassifier, getTransitiveDependents, type FailureClass, type TaskState, type TaskDelta, type TaskStateChanges } from '@invoker/workflow-graph';
+import {
+  FailureClassifier,
+  getTransitiveDependents,
+  isGitPublishFailureClass,
+  type FailureClass,
+  type TaskState,
+  type TaskDelta,
+  type TaskStateChanges,
+} from '@invoker/workflow-graph';
 import type { Logger } from '@invoker/contracts';
 import type { ParsedResponse } from '../response-handler.js';
 import { scopePlanTaskId } from '../task-id-scope.js';
@@ -213,6 +221,8 @@ export function finalizeFailedTaskImpl(
     protocolErrorMessage?: string;
     mergeConflict?: { failedBranch: string; conflictFiles: string[] };
     failureClass?: FailureClass;
+    commit?: string;
+    branch?: string;
   },
   eventName: string,
 ): TaskState[] {
@@ -362,9 +372,85 @@ export function handleFailedImpl(
       lastAgentName: parsed.agentName,
       failureClass: parsed.failureClass,
       mergeConflict,
+      ...(parsed.commitHash !== undefined ? { commit: parsed.commitHash } : {}),
+      ...(parsed.branch !== undefined ? { branch: parsed.branch } : {}),
     },
     'task.failed',
   );
+}
+
+function unskipDescendantsImpl(host: TransitionHost, taskId: string): void {
+  const allTasks = host.stateMachine.getAllTasks();
+  const taskMap = new Map(allTasks.map((task) => [task.id, task]));
+  const descendantIds = getTransitiveDependents(
+    taskId,
+    taskMap,
+    (task) => task.status === 'completed' || task.status === 'stale' || task.config.isReconciliation === true,
+  );
+  for (const descendantId of descendantIds) {
+    const dependent = host.stateGetTask(descendantId);
+    if (!dependent || dependent.status !== 'skipped') continue;
+    const changes: TaskStateChanges = {
+      status: 'pending',
+      execution: { blockedBy: undefined },
+    };
+    const updated = host.writeAndSync(descendantId, changes);
+    const delta: TaskDelta = host.buildUpdateDelta(dependent, updated, changes);
+    host.persistence.logEvent?.(descendantId, 'task.pending', changes);
+    host.messageBus.publish(TASK_DELTA_CHANNEL, delta);
+  }
+}
+
+export function recoverGitPublishSuccessImpl(host: TransitionHost, taskId: string): TaskState[] {
+  const existing = host.stateGetTask(taskId);
+  if (!existing) {
+    throw new OrchestratorError(OrchestratorErrorCode.TASK_NOT_FOUND, `recoverGitPublishSuccess: task ${taskId} not found`);
+  }
+  if (existing.status !== 'failed') {
+    throw new Error(`recoverGitPublishSuccess: task ${taskId} is ${existing.status}, expected failed`);
+  }
+  const failureClass = existing.execution.failureClass
+    ?? FailureClassifier.classifyGitPublishError(existing.execution.error);
+  if (!isGitPublishFailureClass(failureClass)) {
+    throw new Error(`recoverGitPublishSuccess: task ${taskId} is not a git publish failure`);
+  }
+  if (!existing.execution.commit?.trim() || !existing.execution.branch?.trim()) {
+    throw new Error(`recoverGitPublishSuccess: task ${taskId} has no preserved branch commit`);
+  }
+
+  const changes: TaskStateChanges = {
+    status: 'completed',
+    execution: {
+      exitCode: 0,
+      error: undefined,
+      failureClass: undefined,
+      completedAt: new Date(),
+    },
+  };
+  const updated = host.writeAndSync(taskId, changes);
+  const attemptId = updated.execution.selectedAttemptId;
+  if (attemptId) {
+    host.taskRepository.updateAttempt(attemptId, {
+      status: 'completed',
+      exitCode: 0,
+      error: undefined,
+      completedAt: changes.execution?.completedAt,
+      commit: existing.execution.commit,
+    });
+  }
+  const delta: TaskDelta = host.buildUpdateDelta(existing, updated, changes);
+  host.persistence.logEvent?.(taskId, 'task.git_publish_recovered', changes);
+  host.messageBus.publish(TASK_DELTA_CHANNEL, delta);
+
+  unskipDescendantsImpl(host, taskId);
+  checkExperimentCompletionImpl(host, taskId);
+
+  const readyTaskIds = host.stateMachine.findNewlyReadyTasks(taskId);
+  const started = host.autoStartReadyTasks(readyTaskIds);
+  started.push(...host.autoStartUnblockedTasks());
+  started.push(...host.autoStartExternallyUnblockedReadyTasks());
+  checkWorkflowCompletionImpl(host, existing.config.workflowId);
+  return started;
 }
 
 export function handleNeedsInputImpl(

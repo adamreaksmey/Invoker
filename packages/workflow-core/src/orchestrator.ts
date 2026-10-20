@@ -110,6 +110,7 @@ import {
   handleSelectExperimentImpl,
   checkExperimentCompletionImpl,
   checkWorkflowCompletionImpl,
+  recoverGitPublishSuccessImpl,
 } from './orchestrator/transitions.js';
 import type { TransitionHost } from './orchestrator/transitions.js';
 import {
@@ -2587,6 +2588,10 @@ export class Orchestrator {
 
   retryTask(taskId: string): TaskState[] {
     return retryTaskImpl(this as unknown as LifecycleHost, taskId);
+  }
+
+  recoverGitPublishSuccess(taskId: string): TaskState[] {
+    return recoverGitPublishSuccessImpl(this as unknown as TransitionHost, taskId);
   }
 
   retryWorkflow(workflowId: string): TaskState[] {

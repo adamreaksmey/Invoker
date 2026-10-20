@@ -9,8 +9,9 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 
-import type { Orchestrator } from '@invoker/workflow-core';
+import type { Orchestrator, TaskState } from '@invoker/workflow-core';
 import { FailureClassifier, OrchestratorError, OrchestratorErrorCode, parseMergeConflictError } from '@invoker/workflow-core';
+import { resolveTaskGitPublishFailureClass } from './git-publish-recovery.js';
 import type { SQLiteAdapter } from '@invoker/data-store';
 import { buildAgentExitFailureDetail, cleanElectronEnv, resolveExecutableOnCurrentPath } from './process-utils.js';
 import { assertExecutionModelSupported, DEFAULT_EXECUTION_AGENT, type ExecutionAgent } from './agent.js';
@@ -448,11 +449,39 @@ fi
 /**
  * Build the agent fix prompt based on task type.
  */
+function buildGitPublishFixPrompt(
+  task: Pick<TaskState, 'description' | 'execution'>,
+  errorLines: string,
+): string | undefined {
+  const gitPublishClass = resolveTaskGitPublishFailureClass(task as TaskState);
+  const localCommit = task.execution.commit?.trim();
+  if (!gitPublishClass || !localCommit) return undefined;
+
+  const publishError = task.execution.error ?? 'GitHub rejected the branch push';
+  return [
+    `The task finished successfully and the code changes are already committed locally at ${localCommit}.`,
+    `Remote branch publication failed; your job is to diagnose and fix the GitHub push rejection, then publish the existing branch.`,
+    ``,
+    `Task: ${task.description}`,
+    `Branch: ${task.execution.branch ?? '(unknown)'}`,
+    `Local commit: ${localCommit}`,
+    ``,
+    `Push error:`,
+    publishError,
+    ...(errorLines ? [``, `Task output (last 200 lines):`, errorLines] : []),
+    ``,
+    `Inspect git remotes, gh auth status, and any .github/workflows changes.`,
+    `Do not re-implement the original task; fix credentials, scopes, or branch rules and publish the branch.`,
+  ].join('\n');
+}
+
 export function buildFixPrompt(
-  task: { description: string; config: { command?: string; isMergeNode?: boolean; prompt?: string }; execution: { error?: string } },
+  task: { description: string; config: { command?: string; isMergeNode?: boolean; prompt?: string }; execution: { error?: string; commit?: string; branch?: string; failureClass?: string } },
   taskOutput: string,
 ): string {
   const errorLines = taskOutput.split('\n').slice(-200).join('\n');
+  const gitPublishPrompt = buildGitPublishFixPrompt(task as TaskState, errorLines);
+  if (gitPublishPrompt) return gitPublishPrompt;
 
   if (task.config.isMergeNode) {
     return [

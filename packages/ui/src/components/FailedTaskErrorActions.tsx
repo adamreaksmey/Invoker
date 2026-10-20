@@ -15,8 +15,18 @@ export interface FailedTaskErrorActionsProps {
   fixAgentName: string;
   onFix?: (taskId: string, agentName: string) => void;
   onRestartTask?: (taskId: string) => void;
+  onRetryBranchPublish?: (taskId: string) => void;
   testIdPrefix?: string;
   remediationClassName?: string;
+}
+
+function canRetryBranchPublish(task: TaskState, gitPublishClass: ReturnType<typeof resolveGitPublishFailureClass>): boolean {
+  return Boolean(
+    gitPublishClass
+    && task.execution.commit?.trim()
+    && task.execution.branch?.trim()
+    && task.execution.workspacePath?.trim(),
+  );
 }
 
 export function FailedTaskErrorActions({
@@ -25,6 +35,7 @@ export function FailedTaskErrorActions({
   fixAgentName,
   onFix,
   onRestartTask,
+  onRetryBranchPublish,
   testIdPrefix = 'task-error',
   remediationClassName = 'mt-2 rounded border border-amber-500/40 bg-amber-950/40 p-2 text-xs text-amber-100 whitespace-pre-wrap break-words',
 }: FailedTaskErrorActionsProps) {
@@ -40,7 +51,8 @@ export function FailedTaskErrorActions({
       localCommit: task.execution.commit,
     })
     : undefined;
-  const showActions = Boolean(onFix || onRestartTask);
+  const showRetryPush = canRetryBranchPublish(task, gitPublishClass) && Boolean(onRetryBranchPublish);
+  const showActions = Boolean(onFix || onRestartTask || showRetryPush);
   if (!remediation && !showActions) return null;
 
   const fixLabel = `Fix with ${capitalizeAgentName(fixAgentName)}`;
@@ -56,7 +68,19 @@ export function FailedTaskErrorActions({
         </p>
       )}
       {showActions && (
-        <div className="mt-3 flex gap-2" data-testid={`${testIdPrefix}-recovery-actions`}>
+        <div className="mt-3 flex flex-wrap gap-2" data-testid={`${testIdPrefix}-recovery-actions`}>
+          {showRetryPush && onRetryBranchPublish && (
+            <button
+              type="button"
+              data-testid={`${testIdPrefix}-retry-push`}
+              data-sidebar-nav-item
+              data-sidebar-nav-order="13"
+              onClick={() => onRetryBranchPublish(task.id)}
+              className="flex-1 rounded bg-emerald-700 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-emerald-600 min-w-[7rem]"
+            >
+              Retry Push
+            </button>
+          )}
           {onFix && (
             <button
               type="button"

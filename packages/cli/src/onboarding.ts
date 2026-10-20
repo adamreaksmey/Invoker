@@ -28,6 +28,7 @@ import { formatCaughtException, logCaughtException } from './logging.js';
 import { installBundledSkills } from './bundled-skills.js';
 import { HARNESS_REGISTRATION_HINT } from '@invoker/shell/bundled-skills';
 import { runRemoteDoctorChecks } from './remote-doctor.js';
+import { checkGithubWorkflowScope } from './github-auth-preflight.js';
 import { applyWorkerToggle, isDesiredStateWorkerToggle, isPolicyWorkerToggle, ONBOARDING_WORKER_TOGGLES, openWorkerDesiredStateStore, applyDesiredStateWorkerToggle, readDesiredStateWorkerToggleValue, readWorkerToggleValue, resolveCliInstanceProfile } from './worker-toggles.js';
 
 // ── Paths ────────────────────────────────────────────────────
@@ -261,11 +262,25 @@ export function runDoctor(argv: string[]): number {
   }
 
   let checks = buildDoctorChecks(loadCliConfig());
+  if (commandExists('gh')) {
+    checks = [
+      ...checks,
+      checkGithubAuth(),
+      checkGithubWorkflowScope(defaultCommandRunner),
+    ];
+  }
   if (fix) {
     for (const check of checks) {
       if (check.status !== 'ok' && INSTALL_SPECS[check.id]) installTool(check.id);
     }
     checks = buildDoctorChecks(loadCliConfig());
+    if (commandExists('gh')) {
+      checks = [
+        ...checks,
+        checkGithubAuth(),
+        checkGithubWorkflowScope(defaultCommandRunner),
+      ];
+    }
   }
 
   const report = buildReport(checks);
@@ -1217,6 +1232,9 @@ export async function collectGithubAndSmokeChecks(options: SetupDeps): Promise<P
 
   const checks: PrerequisiteCheck[] = [];
   checks.push(isInstalled('gh') ? await runGithubAuth(commandRunner) : skippedGithubAuthCheck());
+  if (isInstalled('gh')) {
+    checks.push(checkGithubWorkflowScope(commandRunner));
+  }
   checks.push(await runSmokePlanValidation());
   return checks;
 }

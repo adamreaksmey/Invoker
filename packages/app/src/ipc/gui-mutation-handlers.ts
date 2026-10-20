@@ -70,6 +70,7 @@ import { resolveHeadlessTarget, resolveHeadlessTargetWorkflowId } from '../headl
 import { findHeadlessSetSubcommandScope } from '../headless-command-registry.js';
 import {
   fixWithAgentAction,
+  retryBranchPublishAction,
   rebaseRecreate,
   rebaseRetry,
   recreateWorkflowFromFreshBase,
@@ -2624,6 +2625,41 @@ export async function registerGuiMutationIpcHandlers(context: RegisterGuiMutatio
       logger.error(`resolve-conflict failed: ${err}`, { module: 'ipc' });
       throw err;
     }
+    },
+  );
+
+  registerWorkflowScopedGuiMutationHandler(
+    'invoker:retry-branch-publish',
+    (taskIdArg: unknown) => workflowIdForTaskArg(taskIdArg),
+    'normal',
+    async (taskIdArg: unknown) => {
+      const taskId = String(taskIdArg);
+      try {
+        const started = await retryBranchPublishAction(taskId, {
+          logger,
+          orchestrator,
+          taskExecutor: requireTaskExecutor(),
+        });
+        await finalizeMutationWithGlobalTopup({
+          orchestrator,
+          taskExecutor: requireTaskExecutor(),
+          logger,
+          context: 'ipc.retry-branch-publish',
+          started,
+          mutationTiming: activeMutationContext?.mutationTiming,
+          scopedTaskIds: [taskId],
+        });
+      } catch (err) {
+        await finalizeMutationWithGlobalTopup({
+          orchestrator,
+          taskExecutor: requireTaskExecutor(),
+          logger,
+          context: 'ipc.retry-branch-publish.failure',
+          mutationTiming: activeMutationContext?.mutationTiming,
+        });
+        logger.error(`retry-branch-publish failed: ${err}`, { module: 'ipc' });
+        throw err;
+      }
     },
   );
 

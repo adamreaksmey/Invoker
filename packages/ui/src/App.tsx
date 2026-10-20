@@ -2209,6 +2209,18 @@ export function App() {
     }
   }, [invoker, trackAcceptedMutation]);
 
+  const handleRetryBranchPublish = useCallback(async (taskId: string) => {
+    if (!invoker?.retryBranchPublish) return;
+    setContextMenu(null);
+    try {
+      const result = await invoker.retryBranchPublish(taskId);
+      trackAcceptedMutation(result);
+      refreshTaskGraph();
+    } catch (err) {
+      notifyMutationError('Retry push failed:', err);
+    }
+  }, [invoker, trackAcceptedMutation]);
+
   const handleOpenTerminal = useCallback(
     (taskId: string) => {
       setContextMenu(null);
@@ -5477,6 +5489,7 @@ export function App() {
                   onApprove={openApprovalModal}
                   onReject={openRejectModal}
                   onRestartTask={handleRestartTask}
+                  onRetryBranchPublish={handleRetryBranchPublish}
                   onRecreateTask={handleRecreateTask}
                   onSetMergeBranch={handleSetMergeBranch}
                   onSetMergeMode={handleSetMergeMode}

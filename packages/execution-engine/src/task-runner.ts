@@ -30,6 +30,7 @@ import type { ReviewProviderRegistry } from './review-provider-registry.js';
 import { WorktreeExecutor } from './worktree-executor.js';
 import { isInvokerManagedPoolBranch } from './plan-base-remote.js';
 import { SshExecutor } from './ssh-executor.js';
+import { taskHasPreservedGitPublishCommit } from './git-publish-recovery.js';
 
 import {
   executeMergeNodeImpl,
@@ -1047,6 +1048,50 @@ export class TaskRunner {
       this.releasePoolSelectionLease(poolSelection);
       this.pendingPoolSelections.delete(task.id);
     }
+  }
+
+  async retryBranchPublish(taskId: string): Promise<TaskState[]> {
+    const task = this.orchestrator.getTask(taskId);
+    if (!task) {
+      throw new Error(`Task ${taskId} not found`);
+    }
+    if (!taskHasPreservedGitPublishCommit(task)) {
+      throw new Error(`Task ${taskId} has no preserved git publish commit to retry`);
+    }
+
+    const workspacePath = task.execution.workspacePath!.trim();
+    const branch = task.execution.branch!.trim();
+    const commitHash = task.execution.commit!.trim();
+    const workflow = task.config.workflowId ? this.persistence.loadWorkflow?.(task.config.workflowId) : undefined;
+    const branchRepoUrl = workflow?.intermediateRepoUrl?.trim() || undefined;
+
+    const selectedExecutor = this.selectExecutor(task);
+    const poolSelection = this.pendingPoolSelections.get(task.id);
+    try {
+      const executor = selectedExecutor.executor;
+      let pushError: string | undefined;
+      if (executor instanceof BaseExecutor) {
+        pushError = await executor.retryExistingBranchPublish(workspacePath, branch, commitHash, branchRepoUrl);
+      } else {
+        throw new Error(`Executor ${executor.type} does not support branch publish retry for task ${taskId}`);
+      }
+
+      if (pushError) {
+        const failureClass = FailureClassifier.classifyGitPublishError(pushError);
+        this.persistence.updateTask(taskId, {
+          execution: {
+            error: pushError,
+            ...(failureClass ? { failureClass } : {}),
+          },
+        });
+        throw new Error(pushError);
+      }
+    } finally {
+      this.releasePoolSelectionLease(poolSelection);
+      this.pendingPoolSelections.delete(task.id);
+    }
+
+    return this.orchestrator.recoverGitPublishSuccess(taskId);
   }
 
   async buildMergeSummary(workflowId: string): Promise<string> {

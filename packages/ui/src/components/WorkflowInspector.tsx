@@ -188,6 +188,7 @@ interface WorkflowInspectorProps {
   onApprove?: (task: TaskState) => void;
   onReject?: (task: TaskState) => void;
   onRestartTask?: (taskId: string) => void;
+  onRetryBranchPublish?: (taskId: string) => void;
   onRecreateTask?: (taskId: string) => void;
   onFix?: (taskId: string, agentName: string) => void;
   onSetMergeBranch?: (workflowId: string, baseBranch: string) => Promise<void>;
@@ -335,6 +336,7 @@ export function WorkflowInspector({
   onApprove,
   onReject,
   onRestartTask,
+  onRetryBranchPublish,
   onRecreateTask,
   onFix,
   onSetMergeBranch,
@@ -612,6 +614,7 @@ export function WorkflowInspector({
                 fixAgentName={currentAgent}
                 onFix={onFix}
                 onRestartTask={onRestartTask}
+                onRetryBranchPublish={onRetryBranchPublish}
                 testIdPrefix="inspector-error"
               />
             </div>

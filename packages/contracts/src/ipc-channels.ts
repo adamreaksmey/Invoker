@@ -1326,6 +1326,10 @@ export const IpcChannels = {
     request: [taskId: string, agentName?: string];
     response: WorkflowMutationAcceptedResult;
   },
+  'invoker:retry-branch-publish': {} as {
+    request: [taskId: string];
+    response: WorkflowMutationAcceptedResult;
+  },
 
   // Queue & Configuration
   'invoker:get-queue-status': {} as {

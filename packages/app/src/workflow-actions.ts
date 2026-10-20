@@ -26,7 +26,13 @@ import {
   parseMergeConflictError,
 } from '@invoker/workflow-core';
 import type { SQLiteAdapter } from '@invoker/data-store';
-import { DEFAULT_EXECUTION_AGENT, type TaskRunner, type ReviewGateCiFailureTrigger, formatAgentFailureForTask } from '@invoker/execution-engine';
+import {
+  DEFAULT_EXECUTION_AGENT,
+  type TaskRunner,
+  type ReviewGateCiFailureTrigger,
+  formatAgentFailureForTask,
+  taskHasPreservedGitPublishCommit,
+} from '@invoker/execution-engine';
 import { normalizeMergeModeForPersistence } from './merge-mode.js';
 import {
   isReviewGateCiContextStale,
@@ -906,6 +912,15 @@ function resolveConflictResolutionSettingsForAction(
 }
 
 
+export async function retryBranchPublishAction(
+  taskId: string,
+  deps: Pick<CommandActionDeps, 'logger' | 'orchestrator' | 'taskExecutor'>,
+): Promise<TaskState[]> {
+  const { taskExecutor, logger } = deps;
+  logger.info(`retry-branch-publish: "${taskId}"`, { module: 'workflow-actions' });
+  return taskExecutor.retryBranchPublish(taskId);
+}
+
 export async function fixWithAgentAction(
   taskId: string,
   deps: Pick<CommandActionDeps, 'logger' | 'orchestrator' | 'persistence' | 'autoApproveAIFixes' | 'commandService' | 'mutationTiming'> & { taskExecutor: TaskRunner },
@@ -916,6 +931,7 @@ export async function fixWithAgentAction(
     failureOutputLabel?: string;
     reviewGateContext?: ReviewGateCiContext;
     signal?: AbortSignal;
+    skipGitPublishPushRetry?: boolean;
   } = {},
 ): Promise<FixWithAgentActionResult> {
   const { orchestrator, persistence, taskExecutor } = deps;
@@ -934,6 +950,20 @@ export async function fixWithAgentAction(
 
   const effectiveAgentName = options.agentName ?? resolveTaskRunnerDefaultExecutionAgent(taskExecutor);
   const savedError = task.execution.error ?? '';
+
+  if (!options.reviewGateContext && !options.skipGitPublishPushRetry && taskHasPreservedGitPublishCommit(task)) {
+    try {
+      const started = await retryBranchPublishAction(taskId, deps);
+      return { kind: 'fixWithAgent', autoApproved: false, started };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      deps.logger.info(
+        `fix-with-agent: git publish push retry did not recover task=${taskId}: ${message}`,
+        { module: 'workflow-actions' },
+      );
+    }
+  }
+
   const recoveryRoute = await selectFailureRecoveryRouteForAction(task, savedError, taskExecutor, options.recoveryRoute);
   if (recoveryRoute.kind === 'invalidMergeWorkspace' || recoveryRoute.kind === 'invalidTaskWorkspace') {
     const msg = recoveryRoute.kind === 'invalidMergeWorkspace'

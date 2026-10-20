@@ -64,6 +64,8 @@ export type ParsedResponse =
       error?: string;
       agentName?: string;
       failureClass?: FailureClass;
+      commitHash?: string;
+      branch?: string;
     }
   | {
       type: 'needs_input';
@@ -143,6 +145,8 @@ export class ResponseHandler {
           error: outputs.error,
           agentName: outputs.agentName,
           failureClass: outputs.failureClass,
+          commitHash: outputs.commitHash,
+          branch: outputs.branch,
         };
 
       case 'needs_input':
