@@ -707,20 +707,29 @@ export class PersistedWorkflowMutationCoordinator {
         error: callbackError instanceof Error ? callbackError.message : String(callbackError),
       });
     }
-    if (!event.taskId) {
-      return;
-    }
+    const auditTaskId = event.taskId ?? this.resolveWorkflowAuditTaskId(intent.workflowId);
+    if (!auditTaskId) return;
     try {
-      this.persistence.logEvent(event.taskId, 'workflow.mutation.failed', event);
+      this.persistence.logEvent(
+        auditTaskId,
+        'workflow.mutation.failed',
+        event.taskId ? event : { ...event, auditScope: 'workflow' },
+      );
     } catch (logError) {
       this.options?.logger?.warn('[workflow-mutation-coordinator] failed to persist mutation failure event', {
         module: 'workflow-mutation-coordinator',
         workflowId: intent.workflowId,
         intentId: intent.id,
-        taskId: event.taskId,
+        taskId: auditTaskId,
         error: logError instanceof Error ? logError.message : String(logError),
       });
     }
+  }
+
+  private resolveWorkflowAuditTaskId(workflowId: string): string | undefined {
+    return this.persistence.loadTasks(workflowId)
+      .map((task) => task.id)
+      .sort((a, b) => a.localeCompare(b))[0];
   }
 
   private resolveIntentFailureTaskId(intent: WorkflowMutationIntent): string | undefined {

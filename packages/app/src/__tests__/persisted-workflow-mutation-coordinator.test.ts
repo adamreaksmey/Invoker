@@ -206,8 +206,14 @@ describe('PersistedWorkflowMutationCoordinator', () => {
       channel: 'headless.exec',
     });
     expect(failedEvents[0]).not.toHaveProperty('taskId');
-    expect(adapter.getEvents('wf-1/task-a')
-      .filter((event) => event.eventType === 'workflow.mutation.failed')).toEqual([]);
+    const failureAuditEvents = adapter.getEvents('wf-1/task-a')
+      .filter((event) => event.eventType === 'workflow.mutation.failed');
+    expect(failureAuditEvents).toHaveLength(1);
+    expect(JSON.parse(failureAuditEvents[0]!.payload ?? '{}')).toMatchObject({
+      channel: 'headless.exec',
+      auditScope: 'workflow',
+    });
+    expect(JSON.parse(failureAuditEvents[0]!.payload ?? '{}')).not.toHaveProperty('taskId');
   });
 
   it('keeps invoker channel failure taskId behavior unchanged', async () => {
