@@ -914,10 +914,10 @@ function resolveConflictResolutionSettingsForAction(
 
 export async function retryBranchPublishAction(
   taskId: string,
-  deps: Pick<CommandActionDeps, 'logger' | 'orchestrator' | 'taskExecutor'>,
+  deps: Pick<CommandActionDeps, 'logger' | 'orchestrator'> & { taskExecutor: TaskRunner },
 ): Promise<TaskState[]> {
   const { taskExecutor, logger } = deps;
-  logger.info(`retry-branch-publish: "${taskId}"`, { module: 'workflow-actions' });
+  logger?.info(`retry-branch-publish: "${taskId}"`, { module: 'workflow-actions' });
   return taskExecutor.retryBranchPublish(taskId);
 }
 
@@ -957,7 +957,7 @@ export async function fixWithAgentAction(
       return { kind: 'fixWithAgent', autoApproved: false, started };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      deps.logger.info(
+      deps.logger?.info(
         `fix-with-agent: git publish push retry did not recover task=${taskId}: ${message}`,
         { module: 'workflow-actions' },
       );
