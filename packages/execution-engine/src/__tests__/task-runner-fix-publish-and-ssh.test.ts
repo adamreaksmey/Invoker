@@ -1291,7 +1291,7 @@ describe('TaskRunner', () => {
       expect(createCall).toContain('head=plan/experiment');
     });
 
-    it('authorPrBodyWithSkill uses the configured workflow agent when available', async () => {
+    it('authorPrBodyWithSkill builds a deterministic PR body without invoking make-pr agents', async () => {
       const tempHome = createTempWorkspace();
       const originalHome = process.env.HOME;
       process.env.HOME = tempHome;
@@ -1337,7 +1337,7 @@ describe('TaskRunner', () => {
           cwd: '/tmp',
         });
 
-        expect(result.agentName).toBe('codex');
+        expect(result.agentName).toBe('deterministic');
         expect(result.body).toContain('## Summary');
         expect(result.body).toContain('## Test Plan');
         expect(result.body).toContain('## Revert Plan');
@@ -2077,8 +2077,8 @@ describe('TaskRunner', () => {
           cwd: '/tmp',
         });
 
-        expect(result.agentName).toBe('canonical');
-        expect(result.sessionId).toBe('canonical-fallback');
+        expect(result.agentName).toBe('deterministic');
+        expect(result.sessionId).toBe('deterministic');
         expect(result.body).toContain('## Summary');
         expect(result.body).toContain('## Test Plan');
         expect(result.body).toContain('## Revert Plan');
@@ -2195,98 +2195,91 @@ describe('TaskRunner', () => {
       return cwd;
     }
 
-    it('authorPrBodyWithSkill rejects a canonical-only body and refuses fallback for Invoker repoUrl', async () => {
-      const tempHome = createTempWorkspace();
-      const originalHome = process.env.HOME;
-      process.env.HOME = tempHome;
-      mkdirSync(join(tempHome, '.codex', 'skills', 'invoker-make-pr'), { recursive: true });
-      writeFileSync(join(tempHome, '.codex', 'skills', 'invoker-make-pr', 'SKILL.md'), '# make-pr\n');
+    function invokerReviewStructuredContext() {
+      return {
+        tasks: [{
+          taskId: 'implementation',
+          description: [
+            'Review claim: One reviewable gate change.',
+            'Review Lane: behavior',
+            'Review Unit: routing',
+          ].join('\n'),
+          status: 'completed' as const,
+        }],
+      };
+    }
 
-      try {
-        const executor = makeStrictGateExecutor(makeBodyEmittingAgent(tempHome, CANONICAL_ONLY_BODY));
+    it('authorPrBodyWithSkill rejects invalid deterministic bodies for Invoker repoUrl', async () => {
+      const executor = makeStrictGateExecutor(makeBodyEmittingAgent(createTempWorkspace(), CANONICAL_ONLY_BODY));
 
-        await expect((executor as any).authorPrBodyWithSkill({
-          workflowId: 'wf-1',
-          title: 'Test Workflow',
-          baseBranch: 'master',
-          featureBranch: 'plan/feature',
-          workflowSummary: '## Summary\nSource summary',
-          cwd: '/tmp',
-          repoUrl: 'https://github.com/Neko-Catpital-Labs/Invoker',
-        })).rejects.toThrow(/refusing canonical fallback/);
-      } finally {
-        if (originalHome === undefined) delete process.env.HOME;
-        else process.env.HOME = originalHome;
-      }
+      await expect((executor as any).authorPrBodyWithSkill({
+        workflowId: 'wf-1',
+        title: 'Test Workflow',
+        baseBranch: 'master',
+        featureBranch: 'plan/feature',
+        workflowSummary: '## Summary\nSource summary',
+        cwd: '/tmp',
+        repoUrl: 'https://github.com/Neko-Catpital-Labs/Invoker',
+      })).rejects.toThrow(/deterministic PR body failed validation/);
     });
 
-    it('authorPrBodyWithSkill accepts a review-stack-compliant body for Invoker repoUrl', async () => {
-      const tempHome = createTempWorkspace();
+    it('authorPrBodyWithSkill accepts a validated deterministic body for Invoker repoUrl', async () => {
       const cwd = createCiParityPrWorkspace();
-      const originalHome = process.env.HOME;
-      process.env.HOME = tempHome;
-      mkdirSync(join(tempHome, '.codex', 'skills', 'invoker-make-pr'), { recursive: true });
-      writeFileSync(join(tempHome, '.codex', 'skills', 'invoker-make-pr', 'SKILL.md'), '# make-pr\n');
+      const buildCommand = vi.fn();
+      const agent = {
+        ...makeBodyEmittingAgent(createTempWorkspace(), STRICT_COMPLIANT_REVIEW_STACK_BODY),
+        buildCommand,
+      };
+      const executor = makeStrictGateExecutor(agent, cwd);
 
-      try {
-        const executor = makeStrictGateExecutor(makeBodyEmittingAgent(tempHome, STRICT_COMPLIANT_REVIEW_STACK_BODY), cwd);
+      const result = await (executor as any).authorPrBodyWithSkill({
+        workflowId: 'wf-1',
+        title: 'Test Workflow',
+        baseBranch: 'master',
+        featureBranch: 'plan/feature',
+        workflowSummary: '## Summary\nSource summary',
+        structuredContext: invokerReviewStructuredContext(),
+        cwd,
+        repoUrl: 'git@github.com:EdbertChan/Invoker.git',
+      });
 
-        const result = await (executor as any).authorPrBodyWithSkill({
-          workflowId: 'wf-1',
-          title: 'Test Workflow',
-          baseBranch: 'master',
-          featureBranch: 'plan/feature',
-          workflowSummary: '## Summary\nSource summary',
-          cwd,
-          repoUrl: 'git@github.com:EdbertChan/Invoker.git',
-        });
-
-        expect(result.agentName).toBe('codex');
-        expect(result.body).toContain('## Non-goals');
-        expect(result.body).toContain('## Review Claim');
-      } finally {
-        if (originalHome === undefined) delete process.env.HOME;
-        else process.env.HOME = originalHome;
-      }
+      expect(buildCommand).not.toHaveBeenCalled();
+      expect(result.agentName).toBe('deterministic');
+      expect(result.body).toContain('## Non-goals');
+      expect(result.body).toContain('## Review Claim');
     });
 
-    it('authorPrBodyWithSkill rejects an Invoker refactor body that CI would reject', async () => {
-      const tempHome = createTempWorkspace();
+    it('authorPrBodyWithSkill classifies Invoker review metadata from the local diff', async () => {
       const cwd = createCiParityPrWorkspace();
-      const originalHome = process.env.HOME;
-      process.env.HOME = tempHome;
-      mkdirSync(join(tempHome, '.codex', 'skills', 'invoker-make-pr'), { recursive: true });
-      writeFileSync(join(tempHome, '.codex', 'skills', 'invoker-make-pr', 'SKILL.md'), '# make-pr\n');
+      const bodyWithoutUnchangedBehaviorClaim = STRICT_COMPLIANT_REVIEW_STACK_BODY
+        .replace('\nbehavior\n', '\nrefactor\n');
+      expect((await validateReviewStackPrBodyAgainstLocalDiff({
+        body: bodyWithoutUnchangedBehaviorClaim,
+        cwd,
+        baseBranch: 'master',
+      })).join('\n')).toContain('Review lane refactor must state in ## Non-goals that behavior stays unchanged');
 
-      try {
-        const bodyWithoutUnchangedBehaviorClaim = STRICT_COMPLIANT_REVIEW_STACK_BODY
-          .replace('\nbehavior\n', '\nrefactor\n');
-        expect((await validateReviewStackPrBodyAgainstLocalDiff({
-          body: bodyWithoutUnchangedBehaviorClaim,
-          cwd,
-          baseBranch: 'master',
-        })).join('\n')).toContain('Review lane refactor must state in ## Non-goals that behavior stays unchanged');
-        const executor = makeStrictGateExecutor(
-          makeBodyEmittingAgent(tempHome, bodyWithoutUnchangedBehaviorClaim),
-          cwd,
-        );
+      const result = await makeStrictGateExecutor(
+        makeBodyEmittingAgent(createTempWorkspace(), bodyWithoutUnchangedBehaviorClaim),
+        cwd,
+      ).authorPrBodyWithSkill({
+        workflowId: 'wf-1',
+        title: 'Test Workflow',
+        baseBranch: 'master',
+        featureBranch: 'plan/feature',
+        workflowSummary: '## Summary\nSource summary',
+        structuredContext: invokerReviewStructuredContext(),
+        cwd,
+        repoUrl: 'git@github.com:EdbertChan/Invoker.git',
+      });
 
-        await expect((executor as any).authorPrBodyWithSkill({
-          workflowId: 'wf-1',
-          title: 'Test Workflow',
-          baseBranch: 'master',
-          featureBranch: 'plan/feature',
-          workflowSummary: '## Summary\nSource summary',
-          cwd,
-          repoUrl: 'git@github.com:EdbertChan/Invoker.git',
-        })).rejects.toThrow(/Review lane refactor must state in ## Non-goals that behavior stays unchanged/);
-      } finally {
-        if (originalHome === undefined) delete process.env.HOME;
-        else process.env.HOME = originalHome;
-      }
+      expect(result.agentName).toBe('deterministic');
+      expect(result.body).toContain('## Review Lane');
+      expect(result.body).toContain('behavior');
     });
 
-    it('authorPrBodyWithSkill throws for Invoker repoUrl when no execution agent registry is configured', async () => {
+    it('authorPrBodyWithSkill does not require an execution agent registry', async () => {
+      const cwd = createCiParityPrWorkspace();
       const executor = new TaskRunner({
         orchestrator: {
           getTask: () => null,
@@ -2294,19 +2287,22 @@ describe('TaskRunner', () => {
         } as any,
         persistence: {} as any,
         executorRegistry: { getDefault: () => ({ type: 'worktree' }), get: () => null, getAll: () => [] } as any,
-        cwd: '/tmp',
+        cwd,
         logger: createMockLogger(),
       });
 
-      await expect((executor as any).authorPrBodyWithSkill({
+      const result = await executor.authorPrBodyWithSkill({
         workflowId: 'wf-1',
         title: 'Canonical Test',
         baseBranch: 'master',
         featureBranch: 'plan/canonical',
         workflowSummary: 'Summary.',
-        cwd: '/tmp',
+        structuredContext: invokerReviewStructuredContext(),
+        cwd,
         repoUrl: 'https://github.com/EdbertChan/Invoker',
-      })).rejects.toThrow(/cannot pass scripts\/validate-pr-body\.mjs/);
+      });
+
+      expect(result.agentName).toBe('deterministic');
     });
 
     it('authorPrBodyWithSkill keeps the lenient gate and canonical fallback for non-Invoker repoUrl', async () => {
@@ -2329,7 +2325,7 @@ describe('TaskRunner', () => {
           repoUrl: 'https://github.com/other/repo',
         });
 
-        expect(result.agentName).toBe('codex');
+        expect(result.agentName).toBe('deterministic');
         expect(result.body).toContain('## Test Plan');
       } finally {
         if (originalHome === undefined) delete process.env.HOME;
@@ -2389,7 +2385,7 @@ describe('TaskRunner', () => {
       const outcome = authorNonInvokerBody(CANONICAL_ONLY_BODY, cwd);
 
       await expect(outcome).rejects.toThrow(
-        /^\[pr-authoring\] target repo checker rejected every PR body; refusing canonical fallback/,
+        /^\[pr-authoring\] deterministic PR body failed validation/,
       );
       await expect(outcome).rejects.toThrow(/catstack checker: missing ## Why section/);
     });
@@ -2408,8 +2404,8 @@ describe('TaskRunner', () => {
 
       const result = await authorNonInvokerBody('## Summary\n\nOnly summary', cwd);
 
-      expect(result.agentName).toBe('canonical');
-      expect(result.sessionId).toBe('canonical-fallback');
+      expect(result.agentName).toBe('deterministic');
+      expect(result.sessionId).toBe('deterministic');
       expect(result.body).toContain('## Test Plan');
       expect(result.body).toContain('## Revert Plan');
     });
@@ -2427,9 +2423,10 @@ describe('TaskRunner', () => {
 
       const result = await authorNonInvokerBody(CANONICAL_ONLY_BODY, cwd);
 
-      expect(result.agentName).toBe('codex');
-      expect(result.sessionId).not.toBe('canonical-fallback');
-      expect(result.body).toBe(CANONICAL_ONLY_BODY);
+      expect(result.agentName).toBe('deterministic');
+      expect(result.sessionId).toBe('deterministic');
+      expect(result.body).toContain('## Summary');
+      expect(result.body).toContain('## Test Plan');
     });
 
     it('authorPrBodyWithSkill keeps the canonical fallback for a non-Invoker repo without a checker', async () => {
@@ -2437,8 +2434,8 @@ describe('TaskRunner', () => {
 
       const result = await authorNonInvokerBody('## Summary\n\nOnly summary', cwd);
 
-      expect(result.agentName).toBe('canonical');
-      expect(result.sessionId).toBe('canonical-fallback');
+      expect(result.agentName).toBe('deterministic');
+      expect(result.sessionId).toBe('deterministic');
       expect(result.body).toContain('## Test Plan');
       expect(result.body).toContain('## Revert Plan');
     });
@@ -2508,7 +2505,7 @@ describe('TaskRunner', () => {
           cwd: '/tmp',
         });
 
-        expect(result.agentName).toBe('codex');
+        expect(result.agentName).toBe('deterministic');
         expect(result.body).toContain('## Summary');
         expect(result.body).toContain('## Test Plan');
         expect(result.body).toContain('## Revert Plan');
@@ -2565,8 +2562,8 @@ describe('TaskRunner', () => {
           cwd: '/tmp',
         });
 
-        expect(result.agentName).toBe('canonical');
-        expect(result.sessionId).toBe('canonical-fallback');
+        expect(result.agentName).toBe('deterministic');
+        expect(result.sessionId).toBe('deterministic');
         expect(result.body).toContain('## Summary');
         expect(result.body).toContain('## Test Plan');
         expect(result.body).toContain('## Revert Plan');
@@ -2605,15 +2602,12 @@ describe('TaskRunner', () => {
         cwd: '/tmp',
       });
 
-      expect(result.agentName).toBe('canonical');
-      expect(result.sessionId).toBe('canonical-fallback');
+      expect(result.agentName).toBe('deterministic');
+      expect(result.sessionId).toBe('deterministic');
       expect(result.body).toContain('## Summary');
       expect(result.body).toContain('## Test Plan');
       expect(result.body).toContain('## Revert Plan');
       expect(result.body).toContain('pnpm test');
-      expect(logger.warn).toHaveBeenCalledWith(
-        '[pr-authoring] executionAgentRegistry missing, using canonical fallback PR body.',
-      );
     });
 
     it('authorPrBodyWithSkill deduplicates preferred agent in fallback chain', async () => {
@@ -2665,8 +2659,7 @@ describe('TaskRunner', () => {
           cwd: '/tmp',
         });
 
-        // Claude should succeed on first try — no duplicate attempts
-        expect(result.agentName).toBe('claude');
+        expect(result.agentName).toBe('deterministic');
         expect(result.body).toContain('## Summary');
       } finally {
         if (originalHome === undefined) delete process.env.HOME;
@@ -2743,11 +2736,8 @@ describe('TaskRunner', () => {
           cwd: '/tmp',
         });
 
-        // Preferred agent (claude) fails skill resolution, codex also fails,
-        // gemini succeeds as the third agent in the chain
-        expect(result.agentName).toBe('gemini');
+        expect(result.agentName).toBe('deterministic');
         expect(result.body).toContain('## Summary');
-        expect(result.body).toContain('Gemini authored');
         expect(result.body).toContain('## Test Plan');
         expect(result.body).toContain('## Revert Plan');
       } finally {
@@ -2797,8 +2787,8 @@ describe('TaskRunner', () => {
         cwd: '/tmp',
       });
 
-      expect(result.agentName).toBe('canonical');
-      expect(result.sessionId).toBe('canonical-fallback');
+      expect(result.agentName).toBe('deterministic');
+      expect(result.sessionId).toBe('deterministic');
       expect(result.body).toContain('## Summary');
       expect(result.body).toContain('## Test Plan');
       expect(result.body).toContain('## Revert Plan');
@@ -5567,12 +5557,9 @@ describe('TaskRunner', () => {
           cwd: '/tmp',
         });
 
-        // Preferred agent (codex) should be tried first even though claude was registered first
-        expect(attemptOrder[0]).toBe('codex');
-        // Claude should be tried second as fallback (codex body failed validation)
-        expect(attemptOrder[1]).toBe('claude');
-        // Both agents failed, so canonical fallback
-        expect(result.agentName).toBe('canonical');
+        expect(attemptOrder).toEqual([]);
+        expect(result.agentName).toBe('deterministic');
+        expect(result.body).toContain('## Test Plan');
       } finally {
         if (originalHome === undefined) delete process.env.HOME;
         else process.env.HOME = originalHome;
@@ -5634,7 +5621,7 @@ describe('TaskRunner', () => {
           cwd: '/tmp',
         });
 
-        expect(result.agentName).toBe('codex');
+        expect(result.agentName).toBe('deterministic');
         expect(claudeAttempted).not.toHaveBeenCalled();
       } finally {
         if (originalHome === undefined) delete process.env.HOME;
@@ -5756,8 +5743,8 @@ describe('TaskRunner', () => {
         cwd: '/tmp',
       });
 
-      expect(result.agentName).toBe('canonical');
-      expect(result.sessionId).toBe('canonical-fallback');
+      expect(result.agentName).toBe('deterministic');
+      expect(result.sessionId).toBe('deterministic');
       // Canonical body still contains the verification command
       expect(result.body).toContain('pnpm test');
       expect(result.body).toContain('## Test Plan');
@@ -6058,7 +6045,7 @@ describe('TaskRunner', () => {
       });
 
       // All agents fail (no skill installed) → canonical fallback must preserve visual proof
-      expect(result.agentName).toBe('canonical');
+      expect(result.agentName).toBe('deterministic');
       expect(result.body).toContain('## Visual Proof');
       expect(result.body).toContain('![screenshot](https://img.example.com/proof.png)');
       expect(result.body).toContain('Video walkthrough: [link](https://example.com/video)');

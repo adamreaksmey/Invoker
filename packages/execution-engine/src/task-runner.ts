@@ -53,16 +53,11 @@ import {
   buildValidatedFallbackPrBody,
   isInvokerRepoUrl,
   buildMakePrStackPublishPrompt,
-  buildMakePrPrompt,
   extractAgentReportedError,
   parseMakePrStackPublishResult,
-  repoLocalPrBodyCheckerPath,
   resolveSkillPathViaAgent,
-  runRepoLocalPrBodyChecker,
   spawnAgentPrAuthorViaRegistry,
-  validateCanonicalPrBody,
   validateReviewStackPrBody,
-  validateReviewStackPrBodyAgainstLocalDiff,
   type MakePrStackArtifactOutput,
   type PrAuthoringContext,
 } from './pr-authoring.js';
@@ -1548,111 +1543,24 @@ export class TaskRunner {
     repoUrl?: string;
   }): Promise<{ body: string; sessionId: string; agentName: string }> {
     const strictReviewStack = isInvokerRepoUrl(args.repoUrl);
-    const hasRepoChecker = !strictReviewStack && existsSync(repoLocalPrBodyCheckerPath(args.cwd));
-    if (!this.executionAgentRegistry) {
-      if (strictReviewStack) {
-        throw new Error(
-          '[pr-authoring] executionAgentRegistry missing and target is the Invoker repo; '
-            + 'refusing canonical fallback PR body (it cannot pass scripts/validate-pr-body.mjs).',
-        );
-      }
-      this.logger.warn(
-        '[pr-authoring] executionAgentRegistry missing, using canonical fallback PR body.',
-      );
-    }
-
-    // Build the ordered agent fallback chain:
-    // 1. Preferred agent from workflow tasks
-    // 2. Remaining PR-capable agents in stable registry order
-    const orderedAgents = this.executionAgentRegistry
-      ? this.buildAgentFallbackOrder(
-        this.resolvePrAuthoringAgentName(args.workflowId, args.mergeNodeTaskId),
-        this.executionAgentRegistry.listWithCapability('make-pr'),
-      )
-      : [];
-
-    const errors: string[] = [];
-    let failureClass: FailureClass | undefined;
-    for (const agent of orderedAgents) {
-      const skillPath = resolveSkillPathViaAgent(agent, 'make-pr');
-      if (!skillPath) {
-        errors.push(`${agent.name}: skill "invoker-make-pr" not installed`);
-        continue;
-      }
-
-      const driver = this.executionAgentRegistry?.getSessionDriver(agent.name);
-      const prompt = buildMakePrPrompt({
-        skillPath,
+    this.logger.info(
+      `[pr-authoring] deterministic body generation workflow=${args.workflowId ?? 'unknown'}`
+        + (strictReviewStack ? ' schema=review-stack' : ''),
+    );
+    try {
+      const body = await buildValidatedFallbackPrBody({
         title: args.title,
-        baseBranch: args.baseBranch,
-        featureBranch: args.featureBranch,
         workflowSummary: args.workflowSummary,
         structuredContext: args.structuredContext,
+        cwd: args.cwd,
+        baseBranch: args.baseBranch,
         strictReviewStack,
       });
-
-      try {
-        this.logger.info(
-          `[pr-authoring] body authoring starting agent=${agent.name} `
-            + `workflow=${args.workflowId ?? 'unknown'} skill=invoker-make-pr`
-            + (strictReviewStack ? ' schema=review-stack' : ''),
-        );
-        const result = await spawnAgentPrAuthorViaRegistry(prompt, args.cwd, agent, driver);
-        const validationErrors = strictReviewStack
-          ? await validateReviewStackPrBodyAgainstLocalDiff({
-            body: result.body,
-            cwd: args.cwd,
-            baseBranch: args.baseBranch,
-          })
-          : hasRepoChecker
-            ? [
-              ...validateCanonicalPrBody(result.body),
-              ...(await runRepoLocalPrBodyChecker({
-                body: result.body,
-                cwd: args.cwd,
-                baseBranch: args.baseBranch,
-              })),
-            ]
-            : validateCanonicalPrBody(result.body);
-        if (validationErrors.length > 0) {
-          this.logger.warn(
-            `[pr-authoring] body validation failed agent=${agent.name} `
-              + `errors=${validationErrors.join('; ')}`,
-          );
-          errors.push(
-            `${agent.name}: invalid PR body — ${validationErrors.join('; ')}`,
-          );
-          continue;
-        }
-        this.logger.info(`[pr-authoring] body authored agent=${agent.name} validated`);
-        return { body: result.body, sessionId: result.sessionId, agentName: agent.name };
-      } catch (err) {
-        failureClass ??= failureClassFromThrownError(err);
-        errors.push(
-          `${agent.name}: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    }
-
-    if (strictReviewStack) {
-      throw errorWithFailureClass(
-        '[pr-authoring] All AI agents failed to author a review-stack PR body for the Invoker repo; '
-          + `refusing canonical fallback (it cannot pass scripts/validate-pr-body.mjs). Errors: ${errors.join(' | ')}`,
-        failureClass,
-      );
-    }
-
-    try {
-      const canonicalBody = await buildValidatedFallbackPrBody(args);
-      this.logger.warn(
-        `[pr-authoring] All AI agents failed for PR authoring; using validated canonical fallback. `
-          + `Errors: ${errors.join(' | ')}`,
-      );
-      return { body: canonicalBody, sessionId: 'canonical-fallback', agentName: 'canonical' };
+      return { body, sessionId: 'deterministic', agentName: 'deterministic' };
     } catch (error) {
       throw errorWithFailureClass(
-        `${error instanceof Error ? error.message : String(error)} Author errors: ${errors.join(' | ')}`,
-        failureClass,
+        error instanceof Error ? error.message : String(error),
+        failureClassFromThrownError(error),
       );
     }
   }

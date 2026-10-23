@@ -1317,7 +1317,7 @@ describe('WorktreeExecutor', () => {
       expect(args).toContain('--dangerously-skip-permissions');
       expect(args).toContain('-p');
       const promptArg = args[args.indexOf('-p') + 1];
-      expect(promptArg).toContain('Owning package');
+      expect(promptArg).not.toContain('Worker orientation pack');
       expect(promptArg).toContain('test prompt');
 
       // Verify session ID is set on handle

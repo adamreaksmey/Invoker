@@ -79,7 +79,7 @@ async function author(cwd: string, withAgents: boolean) {
       { taskId: 'check', description: 'Recorded check', status: 'completed', command: 'python3 -m unittest discover -s engine/hooks/build-the-lever/tests' },
     ] },
   });
-  if (withAgents) for (const agent of agents) expect(agent.buildCommand).toHaveBeenCalledOnce();
+  if (withAgents) for (const agent of agents) expect(agent.buildCommand).not.toHaveBeenCalled();
   return result;
 }
 
@@ -87,7 +87,7 @@ describe.skipIf(!target)('Catstack fallback contract (CATSTACK_PR_REPAIR_REPO re
   it.each([true, false])('validates real fallback with failing agents=%s', async (withAgents) => {
     const cwd = fixture();
     const result = await author(cwd, withAgents);
-    expect(result.agentName).toBe('canonical');
+    expect(result.agentName).toBe('deterministic');
     expect(await runRepoLocalPrBodyChecker({ body: result.body, cwd, baseBranch: 'main' })).toEqual([]);
     expect(result.body).toContain('## Review Unit\n\nengine-runtime');
     expect(result.body).toContain(rejectedSummary);

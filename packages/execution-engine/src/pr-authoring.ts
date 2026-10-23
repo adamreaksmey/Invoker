@@ -84,7 +84,7 @@ function stripBullet(value: string): string | undefined {
 
 function headingValue(description: string, heading: string): string | undefined {
   const lines = description.split(/\r?\n/);
-  const start = lines.findIndex((line) => line.trim().toLowerCase().startsWith(`${heading}:`));
+  const start = lines.findIndex((line) => line.trim().toLowerCase().startsWith(`${heading}:`.toLowerCase()));
   if (start < 0) return undefined;
   const inline = lines[start].trim().slice(heading.length + 1).trim();
   if (inline) return stripBullet(inline);
@@ -815,6 +815,17 @@ interface FallbackReviewMetadata {
   lane: string;
 }
 
+function deriveReviewMetadataFromContext(
+  structuredContext?: PrAuthoringContext,
+): FallbackReviewMetadata | undefined {
+  for (const task of structuredContext?.tasks ?? []) {
+    const lane = headingValue(task.description, 'Review Lane');
+    const unit = headingValue(task.description, 'Review Unit');
+    if (lane && unit) return { lane, unit };
+  }
+  return undefined;
+}
+
 async function resolveFallbackReviewMetadata(cwd: string, baseBranch: string): Promise<FallbackReviewMetadata | undefined> {
   if (!existsSync(join(cwd, 'drafter.config.json'))) return undefined;
   const source = `
@@ -869,18 +880,28 @@ export async function buildValidatedFallbackPrBody(args: {
   structuredContext?: PrAuthoringContext;
   cwd: string;
   baseBranch: string;
+  strictReviewStack?: boolean;
 }): Promise<string> {
-  const reviewMetadata = await resolveFallbackReviewMetadata(args.cwd, args.baseBranch);
+  const reviewMetadata = await resolveFallbackReviewMetadata(args.cwd, args.baseBranch)
+    ?? deriveReviewMetadataFromContext(args.structuredContext);
   const body = buildCanonicalPrBody({ ...args, reviewMetadata });
-  const errors = validateCanonicalPrBody(body);
-  if (existsSync(repoLocalPrBodyCheckerPath(args.cwd))) {
-    errors.push(...await runRepoLocalPrBodyChecker({ ...args, body }));
-  } else if (reviewMetadata) {
-    errors.push(`CI-parity PR body validator is missing: ${repoLocalPrBodyCheckerPath(args.cwd)}`);
-  }
+  const errors = args.strictReviewStack
+    ? await validateReviewStackPrBodyAgainstLocalDiff({
+      body,
+      cwd: args.cwd,
+      baseBranch: args.baseBranch,
+    })
+    : [
+      ...validateCanonicalPrBody(body),
+      ...(existsSync(repoLocalPrBodyCheckerPath(args.cwd))
+        ? await runRepoLocalPrBodyChecker({ ...args, body })
+        : reviewMetadata
+          ? [`CI-parity PR body validator is missing: ${repoLocalPrBodyCheckerPath(args.cwd)}`]
+          : []),
+    ];
   if (errors.length > 0) {
-    throw new Error('[pr-authoring] target repo checker rejected every PR body; refusing canonical fallback. '
-      + `Errors: canonical: ${errors.join('; ')}`);
+    throw new Error('[pr-authoring] deterministic PR body failed validation. '
+      + `Errors: ${errors.join('; ')}`);
   }
   return body;
 }

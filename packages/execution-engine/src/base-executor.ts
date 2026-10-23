@@ -10,7 +10,7 @@ import type { Executor, ExecutorHandle, PersistedTaskMeta, TerminalSpec, Unsubsc
 import { bashPreserveOrReset, bashMergeUpstreams, bashFetchNodeRemotes, parsePreserveResult, parseMergeError } from './branch-utils.js';
 import { RESTART_TO_BRANCH_TRACE, traceExecution } from './exec-trace.js';
 import type { AgentRegistry } from './agent-registry.js';
-import { assertExecutionModelSupported, DEFAULT_EXECUTION_AGENT } from './agent.js';
+import { DEFAULT_EXECUTION_AGENT } from './agent.js';
 import { checkStaleness } from './git-staleness-detector.js';
 import { assertNotGitConfigMutation, ensureRemoteUrl } from './git-config-mutation.js';
 import { isGitRefLockRace, pushGitWithGitHubRecovery } from './git-utils.js';
@@ -18,6 +18,11 @@ import { childProcessHasExited, cleanElectronEnv, cleanGitRepositoryEnv, killPro
 import { getExecutorStartTimeoutMs } from './task-runner-launch-support.js';
 import { resolveHandoffScrubCommand } from './handoff-scrub-command.js';
 import { appendProvisionOutputTail, spawnLocalProvisioning } from './local-provisioning.js';
+import {
+  buildAgentCommandFromWorkRequest,
+  buildTaskExecutionPrompt,
+  workRequestToTaskExecutionInput,
+} from './agent-adapter.js';
 
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
@@ -31,34 +36,8 @@ const FAILED_TASK_ERROR_CHAR_LIMIT = 3000;
 
 export const UNCHANGED_AI_TASK_ERROR = 'The agent finished without changing any files.';
 
-const READ_ONLY_UPSTREAM_RE =
-  /do not modify|does not modify (production )?code|only runs the repo test script|do not modify source files/i;
-
 function isUnchangedAiTask(request: WorkRequest, exitCode: number): boolean {
   return exitCode === 0 && request.actionType === 'ai_task';
-}
-
-function formatUpstreamContextForPrompt(ctx: {
-  taskId: string;
-  description: string;
-  summary?: string;
-  commitHash?: string;
-  commitMessage?: string;
-}): string {
-  const haystack = `${ctx.description}\n${ctx.summary ?? ''}\n${ctx.commitMessage ?? ''}`;
-  if (READ_ONLY_UPSTREAM_RE.test(haystack)) {
-    const lines = [
-      `[Completed upstream task: ${ctx.taskId}]`,
-      'Status: completed (read-only verification).',
-    ];
-    if (ctx.summary) lines.push(`Summary: ${ctx.summary}`);
-    if (ctx.commitHash) lines.push(`Commit: ${ctx.commitHash}`);
-    return lines.join('\n');
-  }
-  let line = `[Completed upstream task: ${ctx.taskId}]\nDescription: ${ctx.description}\nSummary: ${ctx.summary ?? 'N/A'}`;
-  if (ctx.commitHash) line += `\nCommit: ${ctx.commitHash}`;
-  if (ctx.commitMessage) line += `\nCommit message:\n${ctx.commitMessage}`;
-  return line;
 }
 
 const FAILED_TASK_ERROR_LINE_PATTERNS = [
@@ -72,61 +51,6 @@ const FAILED_TASK_ERROR_LINE_PATTERNS = [
   /^\s*(?:exit code|exit status)\s*[=:]?\s*[1-9]\d*\b/i,
   /\bELIFECYCLE\b.*\bCommand failed with exit code [1-9]\d*\b/i,
 ];
-
-const PACKAGE_PATH_RE = /\bpackages\/[A-Za-z0-9._-]+(?=\/|\b)/g;
-const EMBEDDED_JOB_LOG_RE = /^Job log \(tail\):[ \t]*$/m;
-const HEAD_SHA_RE = /^[ \t]*Head SHA:[ \t]*([0-9a-f]{7,40})[ \t]*$/im;
-
-function withoutEmbeddedJobLog(part: string): string {
-  const marker = part.search(EMBEDDED_JOB_LOG_RE);
-  return marker === -1 ? part : part.slice(0, marker);
-}
-
-function taskTextWithoutJobLogs(request: WorkRequest): string {
-  return [
-    request.actionId,
-    request.inputs.description,
-    request.inputs.prompt,
-    request.inputs.command,
-  ]
-    .filter((part): part is string => typeof part === 'string' && part.length > 0)
-    .map(withoutEmbeddedJobLog)
-    .join('\n');
-}
-
-function inferOwningPackage(request: WorkRequest): string {
-  const haystack = taskTextWithoutJobLogs(request);
-  const packages = [...new Set(haystack.match(PACKAGE_PATH_RE) ?? [])];
-  if (packages.length === 1) return packages[0];
-  if (packages.length > 1) return `${packages[0]} (plus explicitly named sibling paths)`;
-  return 'not specified; infer the narrowest package from the named files before editing';
-}
-
-function inferNamedHeadSha(request: WorkRequest): string | undefined {
-  return HEAD_SHA_RE.exec(taskTextWithoutJobLogs(request))?.[1];
-}
-
-function buildWorkerOrientationPack(request: WorkRequest): string {
-  const owningPackage = inferOwningPackage(request);
-  const headSha = inferNamedHeadSha(request);
-  const lines = [
-    'Worker orientation pack:',
-    `- Owning package: ${owningPackage}`,
-    '- Allowed files: stay inside the owning package and any task-named files unless the task explicitly widens scope.',
-    '- Do not start with an unscoped repository walk; inspect the named package, files, and existing tests first.',
-  ];
-  if (headSha) {
-    lines.push(
-      `- Head SHA ${headSha} is named in this task: run \`git rev-parse HEAD\` first, and if it differs,`
-      + ' reconcile before reading or editing any file.'
-      + ' A worktree can start on the default branch, where a file the task names does not exist yet.',
-      '- Reconcile without destroying work: a reused worktree can arrive with uncommitted changes, so run'
-      + ' `git status --porcelain` and, if it prints anything, `git stash push -u` to preserve that work'
-      + ` before \`git reset --hard ${headSha}\`. Never hard-reset over a dirty worktree you have not stashed.`,
-    );
-  }
-  return lines.join('\n');
-}
 
 function failedTaskErrorTail(output: string): string | undefined {
   const lines = output.split('\n');
@@ -1408,13 +1332,8 @@ export abstract class BaseExecutor<TEntry extends BaseEntry> implements Executor
       if (opts?.agentRegistry) {
         const agentName = request.inputs.executionAgent ?? DEFAULT_EXECUTION_AGENT;
         const agent = opts.agentRegistry.getOrThrow(agentName);
-        assertExecutionModelSupported(agent, request.inputs.executionModel);
-        const fullPrompt = this.buildFullPrompt(request);
-        const spec = agent.buildCommand(fullPrompt, {
-          executionModel: request.inputs.executionModel,
-          maxTurns: request.inputs.maxTurns,
-        });
-        return { cmd: spec.cmd, args: spec.args, agentSessionId: spec.sessionId, fullPrompt: spec.fullPrompt };
+        const cwd = request.inputs.workspacePath ?? process.cwd();
+        return buildAgentCommandFromWorkRequest(request, cwd, agent);
       }
       const requestedAgent = request.inputs.executionAgent;
       if (requestedAgent) {
@@ -1624,24 +1543,8 @@ export abstract class BaseExecutor<TEntry extends BaseEntry> implements Executor
    * non-goals cannot redefine an implementation task.
    */
   protected buildFullPrompt(request: WorkRequest): string {
-    let taskBody = request.inputs.prompt ?? '';
-    if (request.actionType === 'ai_task') {
-      taskBody = `${buildWorkerOrientationPack(request)}\n\n${taskBody}`;
-    }
-    const upstream = request.inputs.upstreamContext ?? [];
-    let fullPrompt = taskBody;
-    if (upstream.length > 0) {
-      const contextLines = upstream.map((ctx) => formatUpstreamContextForPrompt(ctx));
-      fullPrompt = [
-        taskBody,
-        '',
-        'Completed upstream dependencies (context only).',
-        'Do not adopt upstream Non-goals. Your job is the task above; make the required file changes and commit them.',
-        '',
-        contextLines.join('\n\n'),
-      ].join('\n');
-    }
-    return fullPrompt;
+    const cwd = request.inputs.workspacePath ?? process.cwd();
+    return buildTaskExecutionPrompt(workRequestToTaskExecutionInput(request, cwd));
   }
 
   /**
