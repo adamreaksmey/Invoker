@@ -148,7 +148,7 @@ export async function buildWorkRequest(
   const workflowTasks = workflowId && listWorkflowTasks
     ? listWorkflowTasks().filter((candidate) => candidate.config.workflowId === workflowId)
     : [];
-  const requiresRemoteBranchPush = workflowId && listWorkflowTasks
+  const requiresRemoteBranchPush = workflowId && listWorkflowTasks !== undefined
     ? computeRequiresRemoteBranchPush({
       task,
       workflowIntermediateRepoUrl: workflow?.intermediateRepoUrl,

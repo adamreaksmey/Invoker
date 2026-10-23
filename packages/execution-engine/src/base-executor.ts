@@ -1505,9 +1505,9 @@ export abstract class BaseExecutor<TEntry extends BaseEntry> implements Executor
     }
 
     let pushError: string | undefined;
-    const shouldPublishBranch = opts?.branch && request.inputs.requiresRemoteBranchPush !== false;
-    if (shouldPublishBranch) {
-      pushError = await this.pushBranchToRemote(cwd, opts.branch, executionId, undefined, commitHash);
+    const publishBranch = opts?.branch;
+    if (publishBranch && request.inputs.requiresRemoteBranchPush !== false) {
+      pushError = await this.pushBranchToRemote(cwd, publishBranch, executionId, undefined, commitHash);
     } else if (opts?.branch && request.inputs.requiresRemoteBranchPush === false) {
       this.emitOutput(
         executionId,
