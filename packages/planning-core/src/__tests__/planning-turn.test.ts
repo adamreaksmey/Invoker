@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { evaluatePlanningTurn } from '../planning-turn.js';
+import {
+  evaluatePlanningTurn,
+  requiresPlanningWorktree,
+  resolvePlanningInteractionMode,
+} from '../planning-turn.js';
 
 const planText = [
   'name: Shared planning lifecycle',
@@ -7,6 +11,45 @@ const planText = [
   '  - id: implement',
   '    description: Implement the shared lifecycle',
 ].join('\n');
+
+describe('resolvePlanningInteractionMode', () => {
+  it('defaults greetings and open questions to conversation', () => {
+    expect(resolvePlanningInteractionMode({ userMessage: 'hello' })).toBe('conversation');
+    expect(resolvePlanningInteractionMode({ userMessage: 'What files touch planning?' })).toBe('conversation');
+  });
+
+  it('routes explicit local agent requests to direct task execution', () => {
+    expect(resolvePlanningInteractionMode({
+      userMessage: 'fix the flaky test',
+      explicitDirectTask: true,
+    })).toBe('direct_task');
+  });
+
+  it('keeps agent-session submit phrases on the direct-task path for plan-intent signaling', () => {
+    expect(resolvePlanningInteractionMode({
+      userMessage: 'submit it',
+      sessionConversationMode: 'agent',
+    })).toBe('direct_task');
+  });
+
+  it('routes draft authorization and plan prefixes to planned workflow execution', () => {
+    expect(resolvePlanningInteractionMode({ userMessage: 'Please draft the plan' })).toBe('planned_workflow');
+    expect(resolvePlanningInteractionMode({ userMessage: 'plan: add a health endpoint' })).toBe('planned_workflow');
+    expect(resolvePlanningInteractionMode({
+      userMessage: 'yes',
+      messagesBeforeTurn: [{
+        role: 'assistant',
+        content: 'Would you like me to draft the YAML plan?',
+      }],
+    })).toBe('planned_workflow');
+  });
+
+  it('requires worktrees only for planned workflow execution', () => {
+    expect(requiresPlanningWorktree('conversation')).toBe(false);
+    expect(requiresPlanningWorktree('direct_task')).toBe(false);
+    expect(requiresPlanningWorktree('planned_workflow')).toBe(true);
+  });
+});
 
 describe('evaluatePlanningTurn', () => {
   it('stages a valid current-turn draft even when prompt drafting was not authorized', () => {

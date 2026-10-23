@@ -31,6 +31,11 @@ vi.mock('node:child_process', async (importOriginal) => {
 
 const mockSpawn = vi.mocked(child_process.spawn);
 
+function lastSpawnedPlannerPrompt(): string {
+  const args = mockSpawn.mock.calls.at(-1)?.[1] as string[] | undefined;
+  return args?.at(-1) ?? '';
+}
+
 // ── Mock ConversationRepository ─────────────────────────────
 
 function createMockRepo() {
@@ -260,7 +265,7 @@ describe('SessionManager', () => {
     expect(handle).not.toBeNull();
 
     await handle!.sendMessage('Add a health endpoint');
-    const prompt = mockSpawn.mock.calls[0][1]![1] as string;
+    const prompt = lastSpawnedPlannerPrompt();
 
     // The thread's own resolved repo, not the manager-level default, must
     // reach the planning LLM's system prompt.
@@ -287,7 +292,7 @@ describe('SessionManager', () => {
     expect(handle).not.toBeNull();
 
     await handle!.sendMessage('Add a health endpoint');
-    const prompt = mockSpawn.mock.calls[0][1]![1] as string;
+    const prompt = lastSpawnedPlannerPrompt();
     expect(prompt).toContain('repoUrl: "git@github.com:Neko-Catpital-Labs/Invoker.git"');
 
     singleRepoManager.stop();

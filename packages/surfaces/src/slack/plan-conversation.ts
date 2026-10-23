@@ -45,9 +45,12 @@ import {
   formatPlanningHostedTurn,
   isDraftingAuthorized,
   planningHostContext,
+  resolvePlanningInteractionMode,
   summarizePlanText,
   type PlanningHostSurface,
+  type PlanningInteractionMode,
 } from '@invoker/planning-core';
+import { parseLocalRequest } from './mention-parsers.js';
 import type { LogFn } from '../surface.js';
 import { createPlanningDraftDoctor } from './planning-draft-doctor.js';
 import type { PlanningDraftDoctor, PlanningDraftDoctorResult } from './planning-draft-doctor.js';
@@ -285,6 +288,14 @@ function isDraftingAuthorizedForPrompt(messages: ConversationMessage[]): boolean
   return isDraftingAuthorized(latest.content, messages.slice(0, -1));
 }
 
+function routingUserMessage(userMessage: string, planningSurface?: PlanningHostSurface): string {
+  if (!planningSurface) return userMessage;
+  const marker = '\n\nUser message:\n';
+  const markerIndex = userMessage.lastIndexOf(marker);
+  if (markerIndex === -1) return userMessage;
+  return userMessage.slice(markerIndex + marker.length).trim();
+}
+
 // ── System Prompt ───────────────────────────────────────────
 
 export const SLACK_LOCAL_REPRO_POLICY = `Execution boundary:
@@ -447,6 +458,21 @@ Rules:
 8. ${handoffInstructions}
 9. Always include \`dependencies\` (even if empty array).
 10. Choose \`mergeMode\` deliberately. \`pull_request\` plans default to \`mergeMode: external_review\` so changes land through the canonical GitHub-backed review gate. Use \`mergeMode: manual\` for verification-only plans that should not open a review, and use \`mergeMode: automatic\` only when the user explicitly wants changes merged without review.`;
+}
+
+export function buildMinimalConversationSystemPrompt(
+  planningSurface?: PlanningHostSurface,
+): string {
+  const hostContext = planningSurface ? planningHostContext(planningSurface) : '';
+  return `You are a helpful assistant in an Invoker planning chat.
+
+${hostContext}
+
+This is a lightweight conversation before any workflow exists. Answer questions and discuss scope in plain language.
+
+Do not draft Invoker YAML, do not walk the repository unless the user asks a concrete code question that requires it, and do not mention submission commands or plan doctors.
+
+For broad implementation requests, ask clarifying questions and summarize tradeoffs before suggesting a formal plan. Keep replies concise.`;
 }
 
 function buildConversationalPlanSystemPrompt(
@@ -617,6 +643,7 @@ export class PlanConversation {
   private activePlannerChild: ChildProcess | null = null;
   private activePlannerReject: ((error: Error) => void) | null = null;
   private activePlannerAbortRequested = false;
+  private currentTurnInteractionMode?: PlanningInteractionMode;
 
   constructor(config: PlanConversationConfig) {
     this.cursorCommand = config.cursorCommand ?? 'agent';
@@ -751,36 +778,76 @@ export class PlanConversation {
     this.resetPlanIntentSignalFile();
     this.messages.push({ role: 'user', content: userMessage });
 
+    const messagesBeforeTurn = this.messages.slice(0, -1);
+    const routedUserMessage = routingUserMessage(userMessage, this.planningSurface);
+    const localRequest = parseLocalRequest(routedUserMessage);
+    const explicitDirectTask = localRequest?.kind === 'agent' || localRequest?.kind === 'change';
+    const previousMode = this.mode;
+    const interactionMode = this.conversationalPlanning
+      ? resolvePlanningInteractionMode({
+        userMessage: routedUserMessage,
+        messagesBeforeTurn,
+        draftingPreauthorized: this.draftingPreauthorized,
+        explicitDirectTask,
+        conversationalPlanning: true,
+      })
+      : previousMode === 'agent'
+        ? resolvePlanningInteractionMode({
+          userMessage: routedUserMessage,
+          messagesBeforeTurn,
+          explicitDirectTask,
+          sessionConversationMode: 'agent',
+        })
+        : (explicitDirectTask ? 'direct_task' : 'planned_workflow');
+    this.currentTurnInteractionMode = interactionMode;
+    if (interactionMode === 'direct_task') {
+      this.mode = 'agent';
+    } else if (this.conversationalPlanning) {
+      this.mode = 'plan';
+    }
+    const turnUsedAgentMode = this.mode === 'agent';
     const prompt = this.buildTurnPrompt();
     const tPrompt = Date.now();
     this.log('plan-conversation', 'info', `[CONV] Turn ${turn}: promptLen=${prompt.length}, historyMsgs=${this.messages.length - 1}, promptPreview="${prompt.slice(0, 500).replace(/\n/g, '\\n')}"`);
 
-    const repoStateBefore = this.mode === 'agent'
+    const repoStateBefore = turnUsedAgentMode
       ? await captureRepoState(this.workingDir)
       : null;
-    const response = await this.spawnPlanner(prompt, turn);
-    const tCursor = Date.now();
-    const formatted = formatCodexPlannerStdout(response);
-    let message = formatted.message;
-    const repoStateAfter = this.mode === 'agent'
-      ? await captureRepoState(this.workingDir)
-      : null;
-    if (this.mode === 'agent' && trackedFilesChanged(repoStateBefore, repoStateAfter)) {
-      restoreTrackedChanges(this.workingDir);
-      message = `${message}\n\n${buildTrackedChangesRevertedNotice()}`;
-    } else if (looksLikeCompletionClaim(message) && repoStateUnchanged(repoStateBefore, repoStateAfter)) {
-      message = `${message}\n\n${buildUnverifiedNotice()}`;
-    }
-    const fileDraft = this.readPlanDraftFile();
-    const inlineDraft = extractYamlPlan(message);
-    const sidecarDraftSelected = Boolean(fileDraft && summarizePlanText(fileDraft));
-    let nextDraft = sidecarDraftSelected ? fileDraft : inlineDraft;
+    let response = '';
+    let formatted = formatCodexPlannerStdout('');
+    let message = '';
+    let nextDraft: string | null = null;
     let finalFormatted = formatted;
-    if (nextDraft && this.draftDoctor) {
-      const gated = await this.gateDraftForReview(nextDraft, message, formatted, turn);
-      nextDraft = gated.planText;
-      message = gated.message;
-      finalFormatted = gated.formatted;
+    let sidecarDraftSelected = false;
+    let tCursor = tPrompt;
+    try {
+      response = await this.spawnPlanner(prompt, turn);
+      tCursor = Date.now();
+      formatted = formatCodexPlannerStdout(response);
+      message = formatted.message;
+      const repoStateAfter = turnUsedAgentMode
+        ? await captureRepoState(this.workingDir)
+        : null;
+      if (turnUsedAgentMode && trackedFilesChanged(repoStateBefore, repoStateAfter)) {
+        restoreTrackedChanges(this.workingDir);
+        message = `${message}\n\n${buildTrackedChangesRevertedNotice()}`;
+      } else if (looksLikeCompletionClaim(message) && repoStateUnchanged(repoStateBefore, repoStateAfter)) {
+        message = `${message}\n\n${buildUnverifiedNotice()}`;
+      }
+      const fileDraft = interactionMode === 'planned_workflow' ? this.readPlanDraftFile() : null;
+      const inlineDraft = interactionMode === 'planned_workflow' ? extractYamlPlan(message) : null;
+      sidecarDraftSelected = Boolean(fileDraft && summarizePlanText(fileDraft));
+      nextDraft = sidecarDraftSelected ? fileDraft : inlineDraft;
+      finalFormatted = formatted;
+      if (nextDraft && this.draftDoctor) {
+        const gated = await this.gateDraftForReview(nextDraft, message, formatted, turn);
+        nextDraft = gated.planText;
+        message = gated.message;
+        finalFormatted = gated.formatted;
+      }
+    } finally {
+      this.mode = previousMode;
+      this.currentTurnInteractionMode = undefined;
     }
     if (nextDraft && this.draftDoctor && this.conversationRepo && this.threadTs) {
       try {
@@ -804,7 +871,9 @@ export class PlanConversation {
     this._lastTurnDraftPlanText = nextDraft;
     this._lastTurnDraftFromSidecarFile = sidecarDraftSelected && Boolean(nextDraft);
     if (nextDraft) this.lastKnownGoodPlanText = nextDraft;
-    this._lastTurnPlanIntentSignal = this.mode === 'agent' ? this.readPlanIntentSignalFile() : null;
+    this._lastTurnPlanIntentSignal = turnUsedAgentMode
+      ? this.readPlanIntentSignalFile()
+      : null;
     if (!nextDraft) {
       message = removeStandaloneSubmitInstruction(message);
     }
@@ -1156,16 +1225,20 @@ export class PlanConversation {
    * and the complete conversation history.
    */
   buildCursorPrompt(): string {
-    const systemPrompt = this.mode === 'plan'
-      ? buildPlanSystemPrompt(this.defaultBranch ?? 'main', this.repoUrl, {
-          conversationalPlanning: this.conversationalPlanning,
-          draftingAuthorized: this.conversationalPlanning
-            && (this.draftingPreauthorized || isDraftingAuthorizedForPrompt(this.messages)),
-          preferStackedWorkflows: this.preferStackedWorkflows,
-          planFilePath: this.planDraftFilePath() ?? undefined,
-          planningSurface: this.planningSurface,
-        })
-      : buildAgentSystemPrompt(this.planIntentSignalFilePath() ?? undefined);
+    const interactionMode = this.currentTurnInteractionMode
+      ?? (this.conversationalPlanning ? 'conversation' : 'planned_workflow');
+    const systemPrompt = interactionMode === 'conversation'
+      ? buildMinimalConversationSystemPrompt(this.planningSurface)
+      : this.mode === 'plan'
+        ? buildPlanSystemPrompt(this.defaultBranch ?? 'main', this.repoUrl, {
+            conversationalPlanning: this.conversationalPlanning,
+            draftingAuthorized: this.conversationalPlanning
+              && (this.draftingPreauthorized || isDraftingAuthorizedForPrompt(this.messages)),
+            preferStackedWorkflows: this.preferStackedWorkflows,
+            planFilePath: this.planDraftFilePath() ?? undefined,
+            planningSurface: this.planningSurface,
+          })
+        : buildAgentSystemPrompt(this.planIntentSignalFilePath() ?? undefined);
     const parts: string[] = [systemPrompt];
 
     if (this.messages.length > 1) {
@@ -1180,11 +1253,13 @@ export class PlanConversation {
     const lastMessage = this.messages[this.messages.length - 1];
     if (lastMessage) {
       parts.push(`\nUser's latest message:\n${lastMessage.content}`);
-      parts.push(this.mode === 'plan'
-        ? (this.conversationalPlanning
-            ? '\nRespond to the latest message in conversational planning mode. Scope first, and only draft YAML when the user has explicitly approved drafting.'
-            : '\nRespond to the latest message. If it requires a plan, explore the codebase and generate one.')
-        : '\nRespond to the latest message as a normal coding agent in this worktree.');
+      parts.push(interactionMode === 'conversation'
+        ? '\nRespond to the latest message in plain language. Do not draft YAML or start a workflow.'
+        : this.mode === 'plan'
+          ? (this.conversationalPlanning
+              ? '\nRespond to the latest message in conversational planning mode. Scope first, and only draft YAML when the user has explicitly approved drafting.'
+              : '\nRespond to the latest message. If it requires a plan, explore the codebase and generate one.')
+          : '\nRespond to the latest message as a normal coding agent in this worktree.');
     }
 
     if (this.experimentalPlanner) {

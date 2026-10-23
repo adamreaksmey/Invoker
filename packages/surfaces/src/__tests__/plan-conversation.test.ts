@@ -596,12 +596,9 @@ describe('PlanConversation', () => {
     await conversational.sendMessage('Build better planning');
 
     const prompt = mockSpawn.mock.calls[0][1][1] as string;
-    expect(prompt).toContain('conversational planning mode');
-    expect(prompt).toContain('Drafting is not authorized yet');
-    expect(prompt).toContain('Ask scoping questions first');
-    expect(prompt).toContain('edge cases, corner cases, architecture choices, ambiguity');
-    expect(prompt).toContain('explain like the user is five');
-    expect(prompt).toContain('asking whether the user wants you to draft the YAML plan');
+    expect(prompt).toContain('lightweight conversation before any workflow exists');
+    expect(prompt).toContain('Do not draft Invoker YAML');
+    expect(prompt).toContain('ask clarifying questions and summarize tradeoffs');
     expect(prompt).not.toContain('name: "Plan Name"');
     expect(prompt).not.toContain('Generate a YAML task plan');
   });

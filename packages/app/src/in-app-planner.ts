@@ -69,6 +69,8 @@ import {
   isDraftingAuthorized,
   looksLikeQuestion,
   preparePlanningReview,
+  requiresPlanningWorktree,
+  resolvePlanningInteractionMode,
   submitPlanningReview,
   summarizePlanText,
   type PlanningMessage,
@@ -944,35 +946,10 @@ async function createSession(
   );
 
   const repoBinding = request?.repoBinding;
-  let worktreeBinding:
-    | { repoUrl: string; baseBranch: string; baseCommit: string; worktreePath: string; worktreeBranch: string }
-    | undefined;
-  if (deps.repoPool && repoBinding) {
-    const provisioned = await provisionPlanningWorktree(deps.repoPool, {
-      repoUrl: repoBinding.repoUrl,
-      baseBranch: repoBinding.baseBranch,
-      sessionId: id,
-    });
-    worktreeBinding = {
-      repoUrl: repoBinding.repoUrl,
-      baseBranch: repoBinding.baseBranch,
-      baseCommit: provisioned.baseCommit,
-      worktreePath: provisioned.worktreePath,
-      worktreeBranch: provisioned.branch,
-    };
-  }
-  const conversationDeps = worktreeBinding
-    ? {
-        ...deps,
-        planDoctorScriptPath: deps.planDoctorScriptPath,
-        workingDir: worktreeBinding.worktreePath,
-        mcpConfigPath: planningMcpConfigPath(worktreeBinding.worktreePath),
-        planningRepoUrl: worktreeBinding.repoUrl,
-      }
-    : {
-        ...deps,
-        planningRepoUrl: repoBinding?.repoUrl,
-      };
+  const conversationDeps = {
+    ...deps,
+    planningRepoUrl: repoBinding?.repoUrl,
+  };
 
   const session: InAppPlanningChatSession = {
     id,
@@ -982,11 +959,11 @@ async function createSession(
     status: 'still_discussing',
     messages: [],
     conversation: new PlanConversation(planConversationConfig(preset, conversationDeps, id, selectHarnessSessionDriver, { conversationalPlanning: true })),
-    repoUrl: worktreeBinding?.repoUrl ?? repoBinding?.repoUrl,
-    baseBranch: worktreeBinding?.baseBranch ?? repoBinding?.baseBranch,
-    baseCommit: worktreeBinding?.baseCommit,
-    worktreePath: worktreeBinding?.worktreePath,
-    worktreeBranch: worktreeBinding?.worktreeBranch,
+    repoUrl: repoBinding?.repoUrl,
+    baseBranch: repoBinding?.baseBranch,
+    baseCommit: undefined,
+    worktreePath: undefined,
+    worktreeBranch: undefined,
     createdAt,
     updatedAt: createdAt,
     nextMessageId: 1,
@@ -1412,7 +1389,14 @@ export async function sendPlanningChatMessage(
       };
 
       try {
-        const activatedWorktree = await activatePlanningSessionWorktree(activeSession, deps);
+        const interactionMode = resolvePlanningInteractionMode({
+          userMessage: message,
+          messagesBeforeTurn,
+          conversationalPlanning: true,
+        });
+        const activatedWorktree = requiresPlanningWorktree(interactionMode)
+          ? await activatePlanningSessionWorktree(activeSession, deps)
+          : false;
         if (activatedWorktree) {
           persistPlanningSession(activeSession, deps.planningSessionStore, false);
         }

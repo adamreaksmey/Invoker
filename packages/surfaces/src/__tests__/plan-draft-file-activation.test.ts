@@ -104,7 +104,8 @@ describe('plan draft file - activation side', () => {
       () => writeFileSync(path, VALID_PLAN_YAML, 'utf8'),
     ));
     const firstReply = await conversation.sendMessage('Draft it');
-    expect(firstReply).toContain(SUBMIT_REPLY_LINE);
+    expect(firstReply).toContain('Plan drafted');
+    expect(conversation.getDraftedPlan()).toBe(VALID_PLAN_YAML.trim());
 
     mockSpawn.mockReturnValueOnce(fakePlannerChild(`Drafted the plan. Summary: one step.\n\n${SUBMIT_REPLY_LINE}`));
     const followUpReply = await conversation.sendMessage('What does it do?');

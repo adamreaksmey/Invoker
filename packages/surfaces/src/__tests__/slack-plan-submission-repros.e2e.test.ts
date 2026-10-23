@@ -448,7 +448,7 @@ describe('Slack plan submission restart repro contracts', () => {
     const slack = surface(commands);
     await start(slack, commands);
     mockSpawn.mockImplementationOnce(() => processWith('ok'));
-    await mention(slack, 'draft the first pass', 'thread-honesty');
+    await mention(slack, 'draft the yaml plan for the first pass', 'thread-honesty');
     mockSpawn.mockImplementationOnce(() => processWith(plan));
     await mention(slack, '/plan', 'plan-turn-1', 'thread-honesty');
     const stale = slackPlanDrafts.getReady('C_LOBBY', 'thread-honesty')!;
@@ -478,12 +478,12 @@ describe('Slack plan submission restart repro contracts', () => {
     await start(slack, commands);
 
     mockSpawn.mockImplementationOnce(() => processWith(plan));
-    await mention(slack, 'draft the first pass', 'conv-turn-1', 'thread-conversational');
+    await mention(slack, 'draft the yaml plan for the first pass', 'conv-turn-1', 'thread-conversational');
     const stale = slackPlanDrafts.getReady('C_LOBBY', 'thread-conversational')!;
     expect(stale).toBeTruthy();
 
     mockSpawn.mockImplementationOnce(() => processWith(plan));
-    await mention(slack, 'please try again', 'conv-turn-2', 'thread-conversational');
+    await mention(slack, 'please draft the yaml plan again', 'conv-turn-2', 'thread-conversational');
     const current = slackPlanDrafts.getReady('C_LOBBY', 'thread-conversational')!;
     expect(current).toBeTruthy();
     expect(current.version).toBe(stale.version + 1);
