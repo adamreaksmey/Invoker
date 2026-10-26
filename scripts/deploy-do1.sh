@@ -144,13 +144,13 @@ trap - EXIT
 rm -rf "$NPM_ASSET_DIR" "$NPM_PACK_DIR"
 echo "npm-global refresh complete: cli=$CLI_VERSION slack=$SLACK_VERSION ui=$UI_VERSION"
 
-systemctl --user unmask slack-manager.service 2>/dev/null || true
-
 LOG_FILE="$(mktemp)"
 setsid bash -c '
   set -euo pipefail
   cd "'"$REPO_ROOT"'"
   APPIMAGE_DEST="packages/npm-ui/vendor/Invoker.AppImage"
+
+  systemctl --user unmask slack-manager.service 2>/dev/null || true
 
   owner_is_up() {
     python3 - <<PY
@@ -225,7 +225,7 @@ PY
   else
     systemctl --user daemon-reload
     systemctl --user enable --now slack-manager.service
-    systemctl --user start slack-manager.service
+    systemctl --user try-restart slack-manager.service
   fi
   systemctl --user is-active --quiet slack-manager.service
 
